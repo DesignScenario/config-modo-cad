@@ -1,0 +1,1282 @@
+import { Circle, Group, Layer, Line, Rect, Stage, Image as KonvaImage } from 'react-konva'
+import { useEffect, useMemo, useRef, useState } from 'react'
+
+const POLYGON_COLOR = '#FFD65B'
+const SELECTED_POLYGON_COLOR = '#0D99FF'
+const POLYGON_POINT_RADIUS = 6
+const POLYGON_POINT_STROKE = 4
+const POLYGON_LINE_STROKE = 4
+const CLOSE_POLYGON_HIT_DISTANCE = 10
+const START_POINT_HIGHLIGHT_RADIUS = 10
+const POLYGON_LABEL_OFFSET = 8
+const EQUIPMENT_HOLD_TO_DRAG_MS = 180
+const MIN_ZOOM = 50
+const MAX_ZOOM = 1000
+
+function hexToRgba(hexColor, alpha) {
+  const sanitized = hexColor.replace('#', '')
+  const value = sanitized.length === 3
+    ? sanitized
+        .split('')
+        .map((char) => `${char}${char}`)
+        .join('')
+    : sanitized
+
+  const red = Number.parseInt(value.slice(0, 2), 16)
+  const green = Number.parseInt(value.slice(2, 4), 16)
+  const blue = Number.parseInt(value.slice(4, 6), 16)
+
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+}
+
+function useElementSize(ref) {
+  const [size, setSize] = useState({ width: 0, height: 0 })
+
+  useEffect(() => {
+    const element = ref.current
+
+    if (!element) {
+      return undefined
+    }
+
+    const updateSize = () => {
+      setSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      })
+    }
+
+    updateSize()
+
+    const observer = new ResizeObserver(() => updateSize())
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [ref])
+
+  return size
+}
+
+function toStagePoint(stage) {
+  const pointerPosition = stage?.getPointerPosition()
+
+  if (!pointerPosition) {
+    return null
+  }
+
+  return {
+    x: pointerPosition.x,
+    y: pointerPosition.y,
+  }
+}
+
+function useLoadedImage(imageSrc) {
+  const [image, setImage] = useState(null)
+
+  useEffect(() => {
+    if (!imageSrc?.src) {
+      setImage(null)
+      return undefined
+    }
+
+    const nextImage = new window.Image()
+    nextImage.onload = () => setImage(nextImage)
+    nextImage.src = imageSrc.src
+
+    return () => {
+      nextImage.onload = null
+    }
+  }, [imageSrc])
+
+  return image
+}
+
+function isNearPoint(sourcePoint, targetPoint, distance) {
+  return Math.hypot(sourcePoint.x - targetPoint.x, sourcePoint.y - targetPoint.y) <= distance
+}
+
+function flattenPoints(points) {
+  return points.flatMap((point) => [point.x, point.y])
+}
+
+function getPolygonTopLeft(points) {
+  return points.reduce(
+    (bounds, point) => ({
+      minX: Math.min(bounds.minX, point.x),
+      minY: Math.min(bounds.minY, point.y),
+    }),
+    { minX: Number.POSITIVE_INFINITY, minY: Number.POSITIVE_INFINITY },
+  )
+}
+
+function isPointInsidePolygon(point, polygonPoints) {
+  let inside = false
+
+  for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i, i += 1) {
+    const xi = polygonPoints[i].x
+    const yi = polygonPoints[i].y
+    const xj = polygonPoints[j].x
+    const yj = polygonPoints[j].y
+
+    const intersects = ((yi > point.y) !== (yj > point.y))
+      && (point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 0.00001) + xi)
+
+    if (intersects) inside = !inside
+  }
+
+  return inside
+}
+
+function rotatePoint(point, center, angleDeg) {
+  if (!angleDeg) {
+    return point
+  }
+
+  const radians = (angleDeg * Math.PI) / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const dx = point.x - center.x
+  const dy = point.y - center.y
+
+  return {
+    x: center.x + dx * cosine - dy * sine,
+    y: center.y + dx * sine + dy * cosine,
+  }
+}
+
+function rotateVector(vector, angleDeg) {
+  if (!angleDeg) {
+    return vector
+  }
+
+  const radians = (angleDeg * Math.PI) / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+
+  return {
+    x: vector.x * cosine - vector.y * sine,
+    y: vector.x * sine + vector.y * cosine,
+  }
+}
+
+// Convert a stage-space point to image-normalized coords [0..1].
+// Falls back to identity when no fitted image is available.
+function stageToNorm(stagePoint, fittedImage) {
+  if (!fittedImage || !fittedImage.width || !fittedImage.height) return stagePoint
+
+  const unrotatedPoint = rotatePoint(stagePoint, fittedImage.center, -fittedImage.rotation)
+
+  return {
+    x: (unrotatedPoint.x - fittedImage.x) / fittedImage.width,
+    y: (unrotatedPoint.y - fittedImage.y) / fittedImage.height,
+  }
+}
+
+// Convert an image-normalized point back to stage-space.
+// Falls back to identity when no fitted image is available.
+function normToStage(normPoint, fittedImage) {
+  if (!fittedImage || !fittedImage.width || !fittedImage.height) return normPoint
+
+  const unrotatedPoint = {
+    x: normPoint.x * fittedImage.width + fittedImage.x,
+    y: normPoint.y * fittedImage.height + fittedImage.y,
+  }
+
+  return rotatePoint(unrotatedPoint, fittedImage.center, fittedImage.rotation)
+}
+
+function clampZoom(value) {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+}
+
+function CadCanvas({
+  activeTool,
+  zoom,
+  imageRotation,
+  backgroundImage,
+  onZoomChange,
+  hasScaleDefinition,
+  onPolygonSegmentCreated,
+  onPolygonCreated,
+  onPolygonDeleted,
+  polygonColorById,
+  polygonLabelById,
+  placedEquipments,
+  isAwaitingScaleLine,
+  clearScaleReferenceToken,
+  onEquipmentDrop,
+  onEquipmentMove,
+  onEquipmentDelete,
+  selectedEquipmentId,
+  renamingEquipmentId,
+  renamingPolygonId,
+  selectedPolygonId,
+  onEquipmentSelect,
+  onPolygonSelect,
+  onCanvasBackgroundClick,
+  onLabelClick,
+  onLabelDoubleClick,
+  onLabelRenameCommit,
+  onEquipmentLabelDoubleClick,
+  onEquipmentLabelRenameCommit,
+  onCancelRename,
+}) {
+  const containerRef = useRef(null)
+  const stageRef = useRef(null)
+  const canvasRenameInputRef = useRef(null)
+  const equipmentRenameInputRef = useRef(null)
+  const equipmentHoldTimerRef = useRef(null)
+  const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 })
+  const canvasRenameOpenedAtRef = useRef(0)
+  const equipmentRenameOpenedAtRef = useRef(0)
+  const size = useElementSize(containerRef)
+  const zoomScale = useMemo(() => zoom / 100, [zoom])
+  const [polygons, setPolygons] = useState([])
+  const [draftPolygonPoints, setDraftPolygonPoints] = useState([])
+  const [draftPolygonCursor, setDraftPolygonCursor] = useState(null)
+  const [scaleDraftStart, setScaleDraftStart] = useState(null)
+  const [scaleDraftCursor, setScaleDraftCursor] = useState(null)
+  const [scaleReferenceSegment, setScaleReferenceSegment] = useState(null)
+  const [rectDraftStart, setRectDraftStart] = useState(null)
+  const [rectDraftCursor, setRectDraftCursor] = useState(null)
+  const [draggingEquipment, setDraggingEquipment] = useState(null)
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const [isMiddlePanning, setIsMiddlePanning] = useState(false)
+  const loadedBackgroundImage = useLoadedImage(backgroundImage)
+  const canvasWidth = size.width || 1
+  const canvasHeight = size.height || 1
+  const normalizedRotation = useMemo(
+    () => ((imageRotation % 360) + 360) % 360,
+    [imageRotation],
+  )
+  const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270
+  const baseFittedBackgroundImage = useMemo(() => {
+    if (!loadedBackgroundImage) {
+      return null
+    }
+
+    const imageWidth = loadedBackgroundImage.naturalWidth || loadedBackgroundImage.width
+    const imageHeight = loadedBackgroundImage.naturalHeight || loadedBackgroundImage.height
+
+    if (!imageWidth || !imageHeight) {
+      return null
+    }
+
+    const layoutWidth = isQuarterTurn ? imageHeight : imageWidth
+    const layoutHeight = isQuarterTurn ? imageWidth : imageHeight
+    const scale = Math.min(canvasWidth / layoutWidth, canvasHeight / layoutHeight)
+    const renderedWidth = imageWidth * scale
+    const renderedHeight = imageHeight * scale
+
+    return {
+      width: renderedWidth,
+      height: renderedHeight,
+    }
+  }, [canvasHeight, canvasWidth, isQuarterTurn, loadedBackgroundImage])
+
+  const fittedBackgroundImage = useMemo(() => {
+    if (!baseFittedBackgroundImage) {
+      return null
+    }
+
+    const scaledWidth = baseFittedBackgroundImage.width * zoomScale
+    const scaledHeight = baseFittedBackgroundImage.height * zoomScale
+
+    const center = {
+      x: canvasWidth / 2 + panOffset.x,
+      y: canvasHeight / 2 + panOffset.y,
+    }
+
+    return {
+      x: center.x - scaledWidth / 2,
+      y: center.y - scaledHeight / 2,
+      width: scaledWidth,
+      height: scaledHeight,
+      center,
+      rotation: normalizedRotation,
+    }
+  }, [baseFittedBackgroundImage, canvasHeight, canvasWidth, normalizedRotation, panOffset.x, panOffset.y, zoomScale])
+
+  useEffect(() => {
+    setPanOffset({ x: 0, y: 0 })
+  }, [backgroundImage?.src])
+
+  useEffect(() => {
+    if (activeTool !== 'polygon') {
+      setDraftPolygonPoints([])
+      setDraftPolygonCursor(null)
+      setScaleDraftStart(null)
+      setScaleDraftCursor(null)
+    }
+    if (activeTool !== 'rectangle') {
+      setRectDraftStart(null)
+      setRectDraftCursor(null)
+    }
+  }, [activeTool])
+
+  useEffect(() => {
+    if (activeTool !== 'select') {
+      onEquipmentSelect?.(null)
+      setDraggingEquipment(null)
+      if (equipmentHoldTimerRef.current) {
+        window.clearTimeout(equipmentHoldTimerRef.current)
+        equipmentHoldTimerRef.current = null
+      }
+    }
+  }, [activeTool, onEquipmentSelect])
+
+  useEffect(() => {
+    const handlePointerUp = () => {
+      if (equipmentHoldTimerRef.current) {
+        window.clearTimeout(equipmentHoldTimerRef.current)
+        equipmentHoldTimerRef.current = null
+      }
+    }
+
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointerup', handlePointerUp)
+      if (equipmentHoldTimerRef.current) {
+        window.clearTimeout(equipmentHoldTimerRef.current)
+        equipmentHoldTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!renamingPolygonId) {
+      return
+    }
+
+    canvasRenameOpenedAtRef.current = Date.now()
+    const input = canvasRenameInputRef.current
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, [renamingPolygonId])
+
+  useEffect(() => {
+    if (!renamingEquipmentId) {
+      return
+    }
+
+    equipmentRenameOpenedAtRef.current = Date.now()
+    const input = equipmentRenameInputRef.current
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, [renamingEquipmentId])
+
+  // Sync editing value when rename starts from outside (tree click).
+  // Delete selected polygon on Delete/Backspace key (select tool only).
+  useEffect(() => {
+    if (activeTool !== 'select') return undefined
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (selectedEquipmentId && !renamingEquipmentId) {
+          onEquipmentDelete?.(selectedEquipmentId)
+          return
+        }
+
+        if (selectedPolygonId && !renamingPolygonId) {
+          setPolygons((curr) => curr.filter((p) => p.id !== selectedPolygonId))
+          onPolygonDeleted?.(selectedPolygonId)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    activeTool,
+    selectedEquipmentId,
+    renamingEquipmentId,
+    selectedPolygonId,
+    renamingPolygonId,
+    onEquipmentDelete,
+    onPolygonDeleted,
+  ])
+
+  useEffect(() => {
+    if (activeTool !== 'polygon' && activeTool !== 'rectangle') {
+      return undefined
+    }
+
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      setDraftPolygonPoints([])
+      setDraftPolygonCursor(null)
+      setScaleDraftStart(null)
+      setScaleDraftCursor(null)
+      setRectDraftStart(null)
+      setRectDraftCursor(null)
+    }
+
+    window.addEventListener('keydown', handleEscape)
+
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [activeTool])
+
+  useEffect(() => {
+    setScaleReferenceSegment(null)
+    setScaleDraftStart(null)
+    setScaleDraftCursor(null)
+  }, [clearScaleReferenceToken])
+
+  useEffect(() => {
+    if (!draggingEquipment) {
+      return undefined
+    }
+
+    const handlePointerMove = (event) => {
+      const container = containerRef.current
+      if (!container) {
+        return
+      }
+
+      const containerRect = container.getBoundingClientRect()
+      const stagePoint = {
+        x: event.clientX - containerRect.left,
+        y: event.clientY - containerRect.top,
+      }
+
+      const targetPolygon = [...polygons]
+        .reverse()
+        .find((polygon) => {
+          const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
+          return isPointInsidePolygon(stagePoint, stagePoints)
+        })
+
+      setDraggingEquipment((currentDrag) => {
+        if (!currentDrag) {
+          return null
+        }
+
+        return {
+          ...currentDrag,
+          point: stageToNorm(stagePoint, fittedBackgroundImage),
+          polygonId: targetPolygon?.id ?? null,
+        }
+      })
+    }
+
+    const handlePointerUp = () => {
+      setDraggingEquipment((currentDrag) => {
+        if (currentDrag?.polygonId) {
+          onEquipmentMove?.({
+            equipmentId: currentDrag.id,
+            point: currentDrag.point,
+            polygonId: currentDrag.polygonId,
+          })
+        }
+
+        return null
+      })
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggingEquipment, fittedBackgroundImage, onEquipmentMove, polygons])
+
+  useEffect(() => {
+    if (!isMiddlePanning) {
+      return undefined
+    }
+
+    const handlePointerMove = (event) => {
+      const deltaX = event.clientX - panStartRef.current.mouseX
+      const deltaY = event.clientY - panStartRef.current.mouseY
+
+      setPanOffset({
+        x: panStartRef.current.panX + deltaX,
+        y: panStartRef.current.panY + deltaY,
+      })
+    }
+
+    const handlePointerUp = () => {
+      setIsMiddlePanning(false)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [isMiddlePanning])
+
+  useEffect(() => {
+    if (!polygonColorById) {
+      return
+    }
+
+    setPolygons((currentPolygons) =>
+      currentPolygons.map((polygon) => {
+        const overrideColor = polygonColorById[polygon.id]
+        return overrideColor ? { ...polygon, color: overrideColor } : polygon
+      }),
+    )
+  }, [polygonColorById])
+
+  useEffect(() => {
+    if (!polygonLabelById) {
+      return
+    }
+
+    setPolygons((currentPolygons) =>
+      currentPolygons.map((polygon) => {
+        const nextLabel = polygonLabelById[polygon.id]
+        return nextLabel ? { ...polygon, label: nextLabel } : polygon
+      }),
+    )
+  }, [polygonLabelById])
+
+  const handleStageMouseDown = () => {
+    if (activeTool === 'select') {
+      onEquipmentSelect?.(null)
+      onCanvasBackgroundClick?.()
+      return
+    }
+
+    if (activeTool === 'rectangle') {
+      if (!hasScaleDefinition) {
+        return
+      }
+
+      const stage = stageRef.current
+      const rawPoint = toStagePoint(stage)
+      if (!rawPoint) return
+      const normPoint = stageToNorm(rawPoint, fittedBackgroundImage)
+
+      if (!rectDraftStart) {
+        setRectDraftStart(normPoint)
+        setRectDraftCursor(normPoint)
+        return
+      }
+
+      // Second click — commit rectangle as a 4-point polygon.
+      const a = rectDraftStart
+      const b = normPoint
+      const rectPoints = [
+        { x: a.x, y: a.y },
+        { x: b.x, y: a.y },
+        { x: b.x, y: b.y },
+        { x: a.x, y: b.y },
+      ]
+      const startStage = normToStage(a, fittedBackgroundImage)
+      const polygonId = `polygon-${Date.now()}-${Math.round(startStage.x)}-${Math.round(startStage.y)}`
+      const completedPolygon = {
+        id: polygonId,
+        points: rectPoints,
+        color: POLYGON_COLOR,
+        label: '',
+      }
+      setPolygons((current) => [...current, completedPolygon])
+      onPolygonCreated?.(completedPolygon)
+      setRectDraftStart(null)
+      setRectDraftCursor(null)
+      return
+    }
+
+    if (activeTool !== 'polygon') {
+      return
+    }
+
+    const stage = stageRef.current
+    const rawPoint = toStagePoint(stage)
+
+    if (!rawPoint) {
+      return
+    }
+
+    // Store all points in image-normalized coords so they follow the PNG on resize.
+    const normPoint = stageToNorm(rawPoint, fittedBackgroundImage)
+
+    if (isAwaitingScaleLine) {
+      if (!scaleDraftStart) {
+        setScaleDraftStart(normPoint)
+        setScaleDraftCursor(normPoint)
+        return
+      }
+
+      const scaleDraftStartStage = normToStage(scaleDraftStart, fittedBackgroundImage)
+      const completedSegment = {
+        start: scaleDraftStart,
+        end: normPoint,
+        lengthPixels: Math.hypot(rawPoint.x - scaleDraftStartStage.x, rawPoint.y - scaleDraftStartStage.y),
+      }
+
+      setScaleReferenceSegment(completedSegment)
+      onPolygonSegmentCreated?.(completedSegment)
+      setScaleDraftStart(null)
+      setScaleDraftCursor(null)
+      return
+    }
+
+    if (!hasScaleDefinition) {
+      return
+    }
+
+    if (draftPolygonPoints.length === 0) {
+      setDraftPolygonPoints([normPoint])
+      setDraftPolygonCursor(normPoint)
+      return
+    }
+
+    // Compare hit distance in stage-space so the threshold stays as physical pixels.
+    const firstPointStage = normToStage(draftPolygonPoints[0], fittedBackgroundImage)
+    if (draftPolygonPoints.length >= 3 && isNearPoint(rawPoint, firstPointStage, CLOSE_POLYGON_HIT_DISTANCE)) {
+      const polygonId = `polygon-${Date.now()}-${Math.round(firstPointStage.x)}-${Math.round(firstPointStage.y)}`
+      const completedPolygon = {
+        id: polygonId,
+        points: draftPolygonPoints,
+        color: POLYGON_COLOR,
+        label: '',
+      }
+
+      setPolygons((currentPolygons) => [...currentPolygons, completedPolygon])
+      onPolygonCreated?.(completedPolygon)
+      setDraftPolygonPoints([])
+      setDraftPolygonCursor(null)
+      return
+    }
+
+    setDraftPolygonPoints((currentPoints) => [...currentPoints, normPoint])
+  }
+
+  const handlePolygonMouseDown = (event, polygonId) => {
+    if (activeTool !== 'select') {
+      return
+    }
+
+    event.cancelBubble = true
+    onEquipmentSelect?.(null)
+    onPolygonSelect?.(polygonId)
+  }
+
+  const handleEquipmentMouseDown = (event, equipment) => {
+    if (activeTool !== 'select') {
+      return
+    }
+
+    if (event.button !== 0) {
+      return
+    }
+
+    event.stopPropagation()
+
+    if (selectedEquipmentId !== equipment.id) {
+      onEquipmentSelect?.(equipment.id)
+      return
+    }
+
+    if (event.detail >= 2) {
+      return
+    }
+
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const stagePoint = {
+      x: event.clientX - containerRect.left,
+      y: event.clientY - containerRect.top,
+    }
+
+    if (equipmentHoldTimerRef.current) {
+      window.clearTimeout(equipmentHoldTimerRef.current)
+    }
+
+    equipmentHoldTimerRef.current = window.setTimeout(() => {
+      setDraggingEquipment({
+        id: equipment.id,
+        point: stageToNorm(stagePoint, fittedBackgroundImage),
+        polygonId: equipment.polygonId,
+      })
+      equipmentHoldTimerRef.current = null
+    }, EQUIPMENT_HOLD_TO_DRAG_MS)
+  }
+
+  const handleSelectedVertexDragMove = (event, polygonId, pointIndex) => {
+    const draggedStagePoint = {
+      x: event.target.x(),
+      y: event.target.y(),
+    }
+
+    const draggedNormPoint = stageToNorm(draggedStagePoint, fittedBackgroundImage)
+
+    setPolygons((currentPolygons) =>
+      currentPolygons.map((polygon) => {
+        if (polygon.id !== polygonId) {
+          return polygon
+        }
+
+        const nextPoints = polygon.points.map((point, index) =>
+          index === pointIndex ? draggedNormPoint : point,
+        )
+
+        return {
+          ...polygon,
+          points: nextPoints,
+        }
+      }),
+    )
+  }
+
+  const handleStageMouseMove = () => {
+    if (activeTool === 'rectangle') {
+      if (!hasScaleDefinition) return
+      if (!rectDraftStart) return
+      const stage = stageRef.current
+      const rawPoint = toStagePoint(stage)
+      if (!rawPoint) return
+      setRectDraftCursor(stageToNorm(rawPoint, fittedBackgroundImage))
+      return
+    }
+
+    if (activeTool !== 'polygon') {
+      return
+    }
+
+    const stage = stageRef.current
+    const rawPoint = toStagePoint(stage)
+
+    if (!rawPoint) {
+      return
+    }
+
+    const normPoint = stageToNorm(rawPoint, fittedBackgroundImage)
+
+    if (isAwaitingScaleLine) {
+      if (scaleDraftStart) {
+        setScaleDraftCursor(normPoint)
+      }
+      return
+    }
+
+    if (!hasScaleDefinition) {
+      return
+    }
+
+    if (draftPolygonPoints.length > 0) {
+      setDraftPolygonCursor(normPoint)
+    }
+  }
+
+  const handleDragOverCanvas = (event) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleCanvasWheel = (event) => {
+    const targetElement = event.target
+    if (targetElement instanceof Element) {
+      const isInsideOverlay = targetElement.closest(
+        '.cad-equipment-overlay, .cad-scale-overlay, .cad-environment-overlay',
+      )
+      if (isInsideOverlay) {
+        return
+      }
+    }
+
+    event.preventDefault()
+
+    const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9
+    const nextZoom = clampZoom(Math.round(zoom * zoomFactor))
+
+    if (nextZoom === zoom) {
+      return
+    }
+
+    const container = containerRef.current
+    const baseImage = baseFittedBackgroundImage
+    const currentImage = fittedBackgroundImage
+
+    if (!container || !baseImage || !currentImage) {
+      onZoomChange?.(nextZoom)
+      return
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const pointer = {
+      x: event.clientX - containerRect.left,
+      y: event.clientY - containerRect.top,
+    }
+
+    const pointerNorm = stageToNorm(pointer, currentImage)
+    const nextScale = nextZoom / 100
+    const nextWidth = baseImage.width * nextScale
+    const nextHeight = baseImage.height * nextScale
+    const nextCenter = {
+      x: canvasWidth / 2,
+      y: canvasHeight / 2,
+    }
+    const rotatedVector = rotateVector(
+      {
+        x: (pointerNorm.x - 0.5) * nextWidth,
+        y: (pointerNorm.y - 0.5) * nextHeight,
+      },
+      normalizedRotation,
+    )
+
+    setPanOffset({
+      x: pointer.x - rotatedVector.x - nextCenter.x,
+      y: pointer.y - rotatedVector.y - nextCenter.y,
+    })
+
+    onZoomChange?.(nextZoom)
+  }
+
+  const handleCanvasMouseDownCapture = (event) => {
+    const isMiddleButton = event.button === 1
+    const isMoveToolDrag = activeTool === 'move' && event.button === 0
+
+    if (!isMiddleButton && !isMoveToolDrag) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    panStartRef.current = {
+      mouseX: event.clientX,
+      mouseY: event.clientY,
+      panX: panOffset.x,
+      panY: panOffset.y,
+    }
+
+    setIsMiddlePanning(true)
+  }
+
+  const handleCanvasAuxClick = (event) => {
+    if (event.button === 1) {
+      event.preventDefault()
+    }
+  }
+
+  const handleDropOnCanvas = (event) => {
+    event.preventDefault()
+
+    const rawPayload = event.dataTransfer.getData('application/x-equipment-item')
+    if (!rawPayload) {
+      return
+    }
+
+    let equipment
+    try {
+      equipment = JSON.parse(rawPayload)
+    } catch {
+      return
+    }
+
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const droppedStagePoint = {
+      x: event.clientX - containerRect.left,
+      y: event.clientY - containerRect.top,
+    }
+
+    const targetPolygon = [...polygons]
+      .reverse()
+      .find((polygon) => {
+        const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
+        return isPointInsidePolygon(droppedStagePoint, stagePoints)
+      })
+
+    if (!targetPolygon) {
+      return
+    }
+
+    onEquipmentDrop?.({
+      polygonId: targetPolygon.id,
+      point: stageToNorm(droppedStagePoint, fittedBackgroundImage),
+      equipment,
+    })
+  }
+
+  const stageWidth = size.width || 1
+  const stageHeight = size.height || 1
+
+  return (
+    <div
+      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}`}
+      ref={containerRef}
+      onMouseDownCapture={handleCanvasMouseDownCapture}
+      onAuxClick={handleCanvasAuxClick}
+      onWheel={handleCanvasWheel}
+      onDragOver={handleDragOverCanvas}
+      onDrop={handleDropOnCanvas}
+    >
+      <div className="cad-canvas-surface">
+        <Stage
+          ref={stageRef}
+          width={stageWidth}
+          height={stageHeight}
+          onMouseDown={handleStageMouseDown}
+          onMouseMove={handleStageMouseMove}
+          className="cad-konva-stage"
+        >
+          <Layer>
+            <Rect
+              x={0}
+              y={0}
+              width={stageWidth}
+              height={stageHeight}
+              fill="#fdfdfd"
+            />
+
+            {loadedBackgroundImage ? (
+              <KonvaImage
+                image={loadedBackgroundImage}
+                x={fittedBackgroundImage?.center?.x ?? 0}
+                y={fittedBackgroundImage?.center?.y ?? 0}
+                width={fittedBackgroundImage?.width ?? canvasWidth}
+                height={fittedBackgroundImage?.height ?? canvasHeight}
+                offsetX={(fittedBackgroundImage?.width ?? canvasWidth) / 2}
+                offsetY={(fittedBackgroundImage?.height ?? canvasHeight) / 2}
+                rotation={fittedBackgroundImage?.rotation ?? 0}
+              />
+            ) : null}
+
+            {polygons.map((polygon, index) => {
+              const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+              const isSelected = activeTool === 'select' && polygon.id === selectedPolygonId
+              return (
+                <Group key={`polygon-${index}-${polygon.points.length}`}>
+                  <Line
+                    points={flattenPoints(stagePoints)}
+                    stroke={isSelected ? SELECTED_POLYGON_COLOR : polygon.color}
+                    fill={hexToRgba(polygon.color, 0.25)}
+                    strokeWidth={POLYGON_LINE_STROKE}
+                    closed
+                    lineCap="round"
+                    lineJoin="round"
+                    onMouseDown={(event) => handlePolygonMouseDown(event, polygon.id)}
+                  />
+
+                  {isSelected
+                    ? stagePoints.map((point, pointIndex) => (
+                        <Circle
+                          key={`selected-point-${polygon.id}-${pointIndex}`}
+                          x={point.x}
+                          y={point.y}
+                          radius={POLYGON_POINT_RADIUS}
+                          fill="#FFFFFF"
+                          stroke={SELECTED_POLYGON_COLOR}
+                          strokeWidth={POLYGON_POINT_STROKE}
+                          draggable
+                          onDragMove={(event) =>
+                            handleSelectedVertexDragMove(event, polygon.id, pointIndex)
+                          }
+                          onMouseDown={(event) => {
+                            event.cancelBubble = true
+                          }}
+                        />
+                      ))
+                    : null}
+                </Group>
+              )
+            })}
+
+            {rectDraftStart && rectDraftCursor ? (() => {
+              const a = normToStage(rectDraftStart, fittedBackgroundImage)
+              const b = normToStage(rectDraftCursor, fittedBackgroundImage)
+              const previewPoints = [
+                { x: a.x, y: a.y },
+                { x: b.x, y: a.y },
+                { x: b.x, y: b.y },
+                { x: a.x, y: b.y },
+              ]
+              return (
+                <Group>
+                  <Line
+                    points={flattenPoints(previewPoints)}
+                    stroke={POLYGON_COLOR}
+                    strokeWidth={POLYGON_LINE_STROKE}
+                    closed
+                    lineCap="round"
+                    lineJoin="round"
+                    dash={[6, 4]}
+                  />
+                  <Circle
+                    x={a.x}
+                    y={a.y}
+                    radius={POLYGON_POINT_RADIUS}
+                    fill="#FFFFFF"
+                    stroke={POLYGON_COLOR}
+                    strokeWidth={POLYGON_POINT_STROKE}
+                  />
+                </Group>
+              )
+            })() : null}
+
+            {scaleReferenceSegment ? (() => {
+              const refStart = normToStage(scaleReferenceSegment.start, fittedBackgroundImage)
+              const refEnd = normToStage(scaleReferenceSegment.end, fittedBackgroundImage)
+              return (
+                <Group>
+                  <Line
+                    points={[refStart.x, refStart.y, refEnd.x, refEnd.y]}
+                    stroke={POLYGON_COLOR}
+                    strokeWidth={POLYGON_LINE_STROKE}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
+                  <Circle
+                    x={refStart.x}
+                    y={refStart.y}
+                    radius={POLYGON_POINT_RADIUS}
+                    fill="#FFFFFF"
+                    stroke={POLYGON_COLOR}
+                    strokeWidth={POLYGON_POINT_STROKE}
+                  />
+                  <Circle
+                    x={refEnd.x}
+                    y={refEnd.y}
+                    radius={POLYGON_POINT_RADIUS}
+                    fill="#FFFFFF"
+                    stroke={POLYGON_COLOR}
+                    strokeWidth={POLYGON_POINT_STROKE}
+                  />
+                </Group>
+              )
+            })() : null}
+
+            {draftPolygonPoints.length > 1 ? (
+              <Line
+                points={flattenPoints(draftPolygonPoints.map((p) => normToStage(p, fittedBackgroundImage)))}
+                stroke={POLYGON_COLOR}
+                strokeWidth={POLYGON_LINE_STROKE}
+                lineCap="round"
+                lineJoin="round"
+              />
+            ) : null}
+
+            {draftPolygonCursor && draftPolygonPoints.length > 0 && !isAwaitingScaleLine ? (() => {
+              const lastStage = normToStage(draftPolygonPoints[draftPolygonPoints.length - 1], fittedBackgroundImage)
+              const cursorStage = normToStage(draftPolygonCursor, fittedBackgroundImage)
+              return (
+                <Line
+                  points={[lastStage.x, lastStage.y, cursorStage.x, cursorStage.y]}
+                  stroke={POLYGON_COLOR}
+                  strokeWidth={POLYGON_LINE_STROKE}
+                  lineCap="round"
+                  lineJoin="round"
+                  dash={[6, 4]}
+                />
+              )
+            })() : null}
+
+            {draftPolygonPoints.length > 0 && !isAwaitingScaleLine
+              ? draftPolygonPoints.map((point, index) => {
+                  const sp = normToStage(point, fittedBackgroundImage)
+                  return (
+                    <Circle
+                      key={`draft-point-${index}-${sp.x}-${sp.y}`}
+                      x={sp.x}
+                      y={sp.y}
+                      radius={POLYGON_POINT_RADIUS}
+                      fill="#FFFFFF"
+                      stroke={POLYGON_COLOR}
+                      strokeWidth={POLYGON_POINT_STROKE}
+                    />
+                  )
+                })
+              : null}
+
+            {draftPolygonPoints.length >= 3 && !isAwaitingScaleLine ? (() => {
+              const firstStage = normToStage(draftPolygonPoints[0], fittedBackgroundImage)
+              return (
+                <Circle
+                  x={firstStage.x}
+                  y={firstStage.y}
+                  radius={START_POINT_HIGHLIGHT_RADIUS}
+                  stroke={POLYGON_COLOR}
+                  strokeWidth={2}
+                  dash={[4, 4]}
+                  fillEnabled={false}
+                />
+              )
+            })() : null}
+
+            {scaleDraftStart && isAwaitingScaleLine ? (() => {
+              const sds = normToStage(scaleDraftStart, fittedBackgroundImage)
+              const sdc = scaleDraftCursor ? normToStage(scaleDraftCursor, fittedBackgroundImage) : null
+              return (
+                <>
+                  <Circle
+                    x={sds.x}
+                    y={sds.y}
+                    radius={POLYGON_POINT_RADIUS}
+                    fill="#FFFFFF"
+                    stroke={POLYGON_COLOR}
+                    strokeWidth={POLYGON_POINT_STROKE}
+                  />
+                  {sdc ? (
+                    <Line
+                      points={[sds.x, sds.y, sdc.x, sdc.y]}
+                      stroke={POLYGON_COLOR}
+                      strokeWidth={POLYGON_LINE_STROKE}
+                      lineCap="round"
+                      lineJoin="round"
+                      dash={[6, 4]}
+                    />
+                  ) : null}
+                </>
+              )
+            })() : null}
+          </Layer>
+        </Stage>
+      </div>
+
+      {(placedEquipments ?? []).map((equipment) => {
+        const visiblePoint = draggingEquipment?.id === equipment.id
+          ? draggingEquipment.point
+          : equipment.point
+        const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
+        const pixelX = stagePoint.x
+        const pixelY = stagePoint.y
+        const isSelected = selectedEquipmentId === equipment.id
+
+        return (
+          <div
+            key={equipment.id}
+            className={`cad-equipment-placement${isSelected ? ' is-selected' : ''}`}
+            style={{ left: pixelX, top: pixelY }}
+            onMouseDown={(event) => handleEquipmentMouseDown(event, equipment)}
+          >
+            <img src={equipment.iconSrc} alt="" className="cad-equipment-placement__icon" draggable={false} />
+            {renamingEquipmentId === equipment.id ? (
+              <input
+                ref={equipmentRenameInputRef}
+                className="cad-equipment-placement__input"
+                defaultValue={equipment.label}
+                onMouseDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    onEquipmentLabelRenameCommit?.(equipment.id, event.currentTarget.value)
+                  } else if (event.key === 'Escape') {
+                    onCancelRename?.()
+                  }
+                  event.stopPropagation()
+                }}
+                onBlur={(event) => {
+                  if (Date.now() - equipmentRenameOpenedAtRef.current < 120) {
+                    return
+                  }
+                  onEquipmentLabelRenameCommit?.(equipment.id, event.currentTarget.value)
+                }}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+            ) : (
+              <span
+                className="cad-equipment-placement__label"
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  onEquipmentLabelDoubleClick?.(equipment.id)
+                }}
+              >
+                {equipment.label}
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      {renamingPolygonId ? (() => {
+        const polygon = polygons.find((p) => p.id === renamingPolygonId)
+        if (!polygon) return null
+
+        const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+        const topLeft = getPolygonTopLeft(stagePoints)
+        const pixelX = topLeft.minX + POLYGON_LABEL_OFFSET
+        const pixelY = topLeft.minY + POLYGON_LABEL_OFFSET
+
+        return (
+          <input
+            ref={canvasRenameInputRef}
+            className="cad-canvas-label-input"
+            style={{ left: pixelX, top: pixelY }}
+            key={renamingPolygonId}
+            defaultValue={polygon.label}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                onLabelRenameCommit?.(renamingPolygonId, event.currentTarget.value)
+              } else if (event.key === 'Escape') {
+                onCancelRename?.()
+              }
+            }}
+            onBlur={(event) => {
+              // Ignore the blur generated by the same click that opened the editor.
+              if (Date.now() - canvasRenameOpenedAtRef.current < 120) {
+                return
+              }
+              onLabelRenameCommit?.(renamingPolygonId, event.currentTarget.value)
+            }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+          />
+        )
+      })() : null}
+
+      {isAwaitingScaleLine ? (
+        <div className="cad-canvas-top-message">Desenhe uma linha para definir a escala</div>
+      ) : null}
+
+      {polygons.map((polygon) => {
+        if (!polygon.label) {
+          return null
+        }
+
+        const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+        const topLeft = getPolygonTopLeft(stagePoints)
+        const pixelX = topLeft.minX + POLYGON_LABEL_OFFSET
+        const pixelY = topLeft.minY + POLYGON_LABEL_OFFSET
+
+        return (
+          <div
+            key={`polygon-label-${polygon.id}`}
+            className="cad-polygon-label"
+            style={{ left: pixelX, top: pixelY }}
+            onMouseDown={(event) => {
+              if (activeTool !== 'select') return
+              event.stopPropagation()
+              onLabelClick?.(polygon.id)
+            }}
+            onDoubleClick={(event) => {
+              if (activeTool !== 'select') return
+              event.stopPropagation()
+              onLabelDoubleClick?.(polygon.id)
+            }}
+          >
+            {polygon.label}
+          </div>
+        )
+      })}
+
+    </div>
+  )
+}
+
+export default CadCanvas
