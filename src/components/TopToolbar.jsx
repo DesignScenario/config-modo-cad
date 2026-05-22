@@ -230,13 +230,6 @@ function TopToolbar({ activeTool, onToolChange, zoom, onZoomChange, onImportImag
             </IconButton>
           </div>
 
-          <button
-            type="button"
-            className="cad-toolbar-menu-action cad-toolbar-menu-action--library"
-            onClick={onToggleEquipmentLibrary}
-          >
-            Biblioteca de Equipamentos
-          </button>
         </div>
 
         <div className="cad-toolbar-zoom">

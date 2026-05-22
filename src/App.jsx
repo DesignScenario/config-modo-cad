@@ -654,6 +654,13 @@ function App() {
     return accumulator
   }, {})
 
+  const polygonCeilingHeightById = environments.reduce((accumulator, environment) => {
+    if (environment.ceilingHeight != null) {
+      accumulator[environment.polygonId] = environment.ceilingHeight
+    }
+    return accumulator
+  }, {})
+
   const renamingEnvironment = environments.find((e) => e.id === renamingEnvironmentId)
   const renamingPolygonId = renamingSource === 'canvas'
     ? (renamingEnvironment?.polygonId ?? null)
@@ -681,6 +688,12 @@ function App() {
         items={menuItems}
         activeItem="CAD"
         userLabel="Login desigscenario1@gmail.com:design01@scenario.ind.br"
+        openItem={showEquipmentLibrary ? 'Equipamentos' : undefined}
+        onItemClick={(item) => {
+          if (item === 'Equipamentos') {
+            setShowEquipmentLibrary((current) => !current)
+          }
+        }}
       />
 
       <div
@@ -757,6 +770,7 @@ function App() {
                 focusPolygonRequest={polygonFocusRequest}
                 polygonColorById={polygonColorById}
                 polygonLabelById={polygonLabelById}
+                polygonCeilingHeightById={polygonCeilingHeightById}
                 placedEquipments={placedEquipments}
                 isAwaitingScaleLine={isAwaitingScaleLine}
                 clearScaleReferenceToken={clearScaleReferenceToken}

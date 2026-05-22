@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 
-function AppMenu({ title, items, activeItem, userLabel }) {
+function AppMenu({ title, items, activeItem, openItem, userLabel, onItemClick }) {
   return (
     <header className="cad-titlebar">
       <div className="cad-titlebar__brand">
@@ -16,7 +16,8 @@ function AppMenu({ title, items, activeItem, userLabel }) {
             <button
               key={item}
               type="button"
-              className={`cad-menubar__item${item === activeItem ? ' is-active' : ''}`}
+              className={`cad-menubar__item${item === activeItem ? ' is-active' : ''}${item === openItem ? ' is-open' : ''}`}
+              onClick={() => onItemClick?.(item)}
             >
               {item}
             </button>

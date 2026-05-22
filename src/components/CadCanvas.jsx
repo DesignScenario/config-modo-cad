@@ -1,5 +1,5 @@
 import { Circle, Group, Layer, Line, Rect, Stage, Image as KonvaImage } from 'react-konva'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import apagarProjeto from '../assets/apagar-projeto.svg'
 
 const POLYGON_COLOR = '#FFD65B'
@@ -512,6 +512,7 @@ function CadCanvas({
   focusPolygonRequest,
   polygonColorById,
   polygonLabelById,
+  polygonCeilingHeightById,
   placedEquipments,
   isAwaitingScaleLine,
   clearScaleReferenceToken,
@@ -1831,6 +1832,7 @@ function CadCanvas({
         const pixelY = placement.y
 
         return (
+          <React.Fragment key={`polygon-label-group-${polygon.id}`}>
           <div
             key={`polygon-label-${polygon.id}`}
             className="cad-polygon-label"
@@ -1878,6 +1880,21 @@ function CadCanvas({
           >
             {placement.lines.join('\n')}
           </div>
+          {polygonCeilingHeightById?.[polygon.id] != null ? (
+            <div
+              key={`polygon-pd-${polygon.id}`}
+              className="cad-polygon-label cad-polygon-label--sub"
+              style={{
+                left: pixelX,
+                top: pixelY + placement.lines.length * placement.lineHeight + 2,
+                fontSize: `${Math.max(10, placement.fontSize - 2)}px`,
+                lineHeight: `${Math.ceil((placement.fontSize - 2) * POLYGON_LABEL_LINE_HEIGHT_RATIO)}px`,
+              }}
+            >
+              {`PD: ${polygonCeilingHeightById[polygon.id]}`}
+            </div>
+          ) : null}
+          </React.Fragment>
         )
       })}
 
