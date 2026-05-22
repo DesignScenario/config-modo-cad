@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import apagarProjeto from '../assets/apagar-projeto.svg'
 import conexaoHardware from '../assets/conexão-hardware.svg'
 import conexaoSoftware from '../assets/conexão-software.svg'
 import ambientes from '../assets/ambientes.svg'
@@ -47,6 +48,8 @@ function TreeNode({
   onRenameRequest,
   onRenameCommit,
   onRenameCancel,
+  onOpenContextMenu,
+  onFocusNode,
 }) {
   const expanded = expandedIds.has(item.id)
   const hasChildren = Boolean(item.children?.length)
@@ -74,7 +77,10 @@ function TreeNode({
   return (
     <div className="cad-tree-node" style={{ '--tree-level': level }}>
       {isRenaming ? (
-        <div className={`cad-tree-row${isRoot ? ' cad-tree-row--root' : ''}${isSelected ? ' cad-tree-row--selected' : ''}`}>
+        <div
+          className={`cad-tree-row${isRoot ? ' cad-tree-row--root' : ''}${isSelected ? ' cad-tree-row--selected' : ''}`}
+          style={{ '--tree-level': level }}
+        >
           <span className="cad-tree-row__toggle" />
           <span className="cad-tree-row__icon">
             <TreeIcon item={item} />
@@ -101,8 +107,23 @@ function TreeNode({
         <button
           type="button"
           className={`cad-tree-row${isRoot ? ' cad-tree-row--root' : ''}${isSelected ? ' cad-tree-row--selected' : ''}`}
+          style={{ '--tree-level': level }}
           onClick={handleRowClick}
-          onDoubleClick={isEnvironment || isEquipmentItem ? () => onRenameRequest?.(item) : undefined}
+          onDoubleClick={
+            isEnvironment
+              ? () => onFocusNode?.(item)
+              : isEquipmentItem
+                ? () => onRenameRequest?.(item)
+                : undefined
+          }
+          onContextMenu={
+            isEnvironment
+              ? (event) => {
+                  event.preventDefault()
+                  onOpenContextMenu?.(event, item)
+                }
+              : undefined
+          }
         >
           <span className="cad-tree-row__toggle">
             {hasChildren ? (
@@ -135,6 +156,8 @@ function TreeNode({
               onRenameRequest={onRenameRequest}
               onRenameCommit={onRenameCommit}
               onRenameCancel={onRenameCancel}
+              onOpenContextMenu={onOpenContextMenu}
+              onFocusNode={onFocusNode}
             />
           ))}
         </div>
@@ -143,11 +166,47 @@ function TreeNode({
   )
 }
 
-function ProjectTree({ project, selectedNodeId, renamingNodeId, onSelectNode, onRenameRequest, onRenameCommit, onRenameCancel }) {
+function ProjectTree({
+  project,
+  selectedNodeId,
+  renamingNodeId,
+  onSelectNode,
+  onRenameRequest,
+  onRenameCommit,
+  onRenameCancel,
+  onDeleteNode,
+  onFocusNode,
+}) {
   const [query, setQuery] = useState('')
+  const [contextMenu, setContextMenu] = useState(null)
   const [expandedIds, setExpandedIds] = useState(() =>
     new Set([project.id, 'sala-de-automacao']),
   )
+  const treeViewRef = useRef(null)
+
+  useEffect(() => {
+    const handleCloseMenu = () => {
+      setContextMenu(null)
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null)
+      }
+    }
+
+    window.addEventListener('pointerdown', handleCloseMenu)
+    window.addEventListener('resize', handleCloseMenu)
+    window.addEventListener('scroll', handleCloseMenu, true)
+    window.addEventListener('keydown', handleEscape)
+
+    return () => {
+      window.removeEventListener('pointerdown', handleCloseMenu)
+      window.removeEventListener('resize', handleCloseMenu)
+      window.removeEventListener('scroll', handleCloseMenu, true)
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [])
 
   const expandAll = () => {
     const ids = new Set()
@@ -180,6 +239,28 @@ function ProjectTree({ project, selectedNodeId, renamingNodeId, onSelectNode, on
   }
 
   const tree = useMemo(() => project, [project])
+
+  const openContextMenu = (event, node) => {
+    const container = treeViewRef.current
+
+    if (!container || !node) {
+      return
+    }
+
+    onSelectNode?.(node)
+
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 172
+    const menuHeight = 64
+    const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
+    const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
+
+    setContextMenu({
+      x: Math.max(4, x),
+      y: Math.max(4, y),
+      node,
+    })
+  }
 
   return (
     <section className="cad-panel cad-panel--tree" aria-label="Projeto">
@@ -233,7 +314,7 @@ function ProjectTree({ project, selectedNodeId, renamingNodeId, onSelectNode, on
         </div>
       </div>
 
-      <div className="cad-tree-view">
+      <div className="cad-tree-view" ref={treeViewRef}>
         <TreeNode
           item={tree}
           expandedIds={expandedIds}
@@ -244,7 +325,40 @@ function ProjectTree({ project, selectedNodeId, renamingNodeId, onSelectNode, on
           onRenameRequest={onRenameRequest}
           onRenameCommit={onRenameCommit}
           onRenameCancel={onRenameCancel}
+          onOpenContextMenu={openContextMenu}
+          onFocusNode={onFocusNode}
         />
+
+        {contextMenu ? (
+          <div
+            className="cad-tree-context-menu"
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="cad-tree-context-menu__item"
+              onClick={() => {
+                onRenameRequest?.(contextMenu.node)
+                setContextMenu(null)
+              }}
+            >
+              <span className="cad-tree-context-menu__label">Renomear</span>
+            </button>
+
+            <button
+              type="button"
+              className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+              onClick={() => {
+                onDeleteNode?.(contextMenu.node)
+                setContextMenu(null)
+              }}
+            >
+              <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+              <span className="cad-tree-context-menu__label">Excluir</span>
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   )

@@ -320,6 +320,7 @@ body.is-dragging-overlay * {
   outline: 0;
   background: transparent;
   font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
   padding: 0 7px;
   min-width: 0;
 }
@@ -332,10 +333,11 @@ body.is-dragging-overlay * {
   border: 2px solid #c8c8c8;
   border-top-width: 2px;
   border-bottom-width: 2px;
+  position: relative;
 }
 
 .cad-tree-node {
-  margin-left: calc(var(--tree-level) * 12px);
+  margin-left: 0;
 }
 
 .cad-tree-row {
@@ -345,7 +347,7 @@ body.is-dragging-overlay * {
   align-items: center;
   gap: 4px;
   height: 23px;
-  padding: 0 6px 0 6px;
+  padding: 0 6px 0 calc(6px + (var(--tree-level, 0) * 12px));
   font-size: 12px;
   color: #1f1f1f;
   border-radius: 2px;
@@ -368,6 +370,49 @@ body.is-dragging-overlay * {
 
 .cad-tree-row--selected:hover {
   background: #f5d59d;
+}
+
+.cad-tree-context-menu {
+  position: absolute;
+  min-width: 172px;
+  border: 1px solid #bababa;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.22);
+  z-index: 15;
+  padding: 3px 0;
+}
+
+.cad-tree-context-menu__item {
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: #1f1f1f;
+  text-align: left;
+}
+
+.cad-tree-context-menu__item:hover {
+  background: #f0f4fa;
+}
+
+.cad-tree-context-menu__item--danger {
+  color: #b53200;
+}
+
+.cad-tree-context-menu__icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.cad-tree-context-menu__label {
+  line-height: 1;
 }
 
 .cad-tree-row__toggle,
@@ -414,7 +459,8 @@ body.is-dragging-overlay * {
   color: #1f1f1f;
   height: 18px;
   min-width: 80px;
-  max-width: 140px;
+  max-width: none;
+  width: 100%;
   outline: none;
   box-shadow: 0 0 0 2px rgba(13, 153, 255, 0.2);
 }
@@ -850,7 +896,8 @@ body.is-dragging-overlay * {
   flex: 1 1 auto;
   min-width: 0;
   height: 23px;
-  border: 1px solid #b9b9b9;
+  border: 1px solid #bababa;
+  border-radius: 2px;
   background: #ffffff;
   display: inline-flex;
   align-items: center;
@@ -865,6 +912,7 @@ body.is-dragging-overlay * {
   outline: none;
   padding: 0 7px;
   font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
 }
 
 .cad-equipment-overlay__tree {
@@ -1001,6 +1049,7 @@ body.is-dragging-overlay * {
   transform: translate(0, 0);
   font-size: 14px;
   font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+  white-space: pre-line;
   color: #1f1f1f;
   pointer-events: auto;
   user-select: none;
@@ -1074,6 +1123,7 @@ body.is-dragging-overlay * {
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
   padding: 0 8px;
   font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
   color: #202020;
 }
 
@@ -1108,7 +1158,7 @@ body.is-dragging-overlay * {
   border-radius: 4px;
   background: #ffffff;
   box-shadow: 0 4px 4px 3px rgba(0, 0, 0, 0.25);
-  overflow: hidden;
+  overflow: visible;
   pointer-events: auto;
 }
 
@@ -1162,12 +1212,123 @@ body.is-dragging-overlay * {
   background: #ffffff;
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
   font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
   color: #202020;
+}
+
+.cad-environment-overlay__input--class {
+  font-family: 'Segoe UI', sans-serif;
 }
 
 .cad-environment-overlay__input:focus {
   outline: none;
   border-color: #9a9a9a;
+}
+
+.cad-environment-overlay__name-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cad-environment-overlay__class-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cad-environment-overlay__name-field .cad-environment-overlay__input {
+  width: 100%;
+  padding-right: 28px;
+}
+
+.cad-environment-overlay__class-field .cad-environment-overlay__input {
+  width: 100%;
+  padding-right: 28px;
+}
+
+.cad-environment-overlay__name-toggle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 25px;
+  height: 27px;
+  border: 0;
+  border-top-right-radius: 2px;
+  border-bottom-right-radius: 2px;
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+
+.cad-environment-overlay__class-indicator {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 25px;
+  height: 27px;
+  border-top-right-radius: 2px;
+  border-bottom-right-radius: 2px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.cad-environment-overlay__name-toggle-icon {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid #4e545f;
+}
+
+.cad-environment-overlay__name-toggle.is-open .cad-environment-overlay__name-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.cad-environment-overlay__input--class {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+.cad-environment-overlay__input--numeric {
+  -moz-appearance: textfield;
+}
+
+.cad-environment-overlay__input--numeric::-webkit-outer-spin-button,
+.cad-environment-overlay__input--numeric::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.cad-environment-overlay__name-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid #bababa;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  z-index: 20;
+}
+
+.cad-environment-overlay__name-option {
+  width: 100%;
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #202020;
+}
+
+.cad-environment-overlay__name-option:hover {
+  background: #f0f4fa;
 }
 
 .cad-environment-overlay__colors {

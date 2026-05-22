@@ -17,6 +17,32 @@ const AUTOMATION_ROOM_ID = 'sala-de-automacao'
 const PROJECT_ROOT_ID = 'novo-projeto'
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
+const ENVIRONMENT_CLASS_OPTIONS = [
+  'Não definida',
+  'Dormitório',
+  'Banheiro',
+  'Social',
+  'Serviço',
+  'Circulação',
+  'Lazer',
+  'Externo',
+  'Trabalho',
+  'Garagem',
+  'Apoio',
+]
+const ENVIRONMENT_CLASS_COLOR_MAP = {
+  'Não definida': '#B3B3B3',
+  'Dormitório': '#6BC2F7',
+  Banheiro: '#00EDFF',
+  Social: '#317C6A',
+  'Serviço': '#FFD65B',
+  'Circulação': '#DDA72F',
+  Lazer: '#FC4242',
+  Externo: '#3BE296',
+  Trabalho: '#D380FF',
+  Garagem: '#FF8740',
+  Apoio: '#FC8DCA',
+}
 
 function clampZoom(value) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
@@ -112,7 +138,7 @@ function App() {
   const [projectTree, setProjectTree] = useState(() => cloneProjectTree(initialProject))
   const [showEnvironmentOverlay, setShowEnvironmentOverlay] = useState(false)
   const [pendingEnvironmentPolygon, setPendingEnvironmentPolygon] = useState(null)
-  const [environmentClassOptions] = useState(['Nao definida'])
+  const [environmentClassOptions] = useState(ENVIRONMENT_CLASS_OPTIONS)
   const [polygonColorById, setPolygonColorById] = useState({})
   const [environments, setEnvironments] = useState([])
   const [placedEquipments, setPlacedEquipments] = useState([])
@@ -123,6 +149,8 @@ function App() {
   const [renamingSource, setRenamingSource] = useState(null)
   const [renamingEquipmentId, setRenamingEquipmentId] = useState(null)
   const [renamingEquipmentSource, setRenamingEquipmentSource] = useState(null)
+  const [polygonDeleteRequestId, setPolygonDeleteRequestId] = useState(null)
+  const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
   const dragStateRef = useRef({ dragging: false })
   const importedImageUrlRef = useRef(null)
 
@@ -371,6 +399,39 @@ function App() {
     setRenamingEquipmentSource(null)
   }
 
+  const handleDeleteNodeFromTree = (node) => {
+    if (node?.source !== 'created-environment') {
+      return
+    }
+
+    const environment = environments.find((currentEnvironment) => currentEnvironment.id === node.id)
+
+    if (!environment?.polygonId) {
+      return
+    }
+
+    setPolygonDeleteRequestId(environment.polygonId)
+    handlePolygonDeleted(environment.polygonId)
+  }
+
+  const handleFocusNodeFromTree = (node) => {
+    if (node?.source !== 'created-environment') {
+      return
+    }
+
+    const environment = environments.find((currentEnvironment) => currentEnvironment.id === node.id)
+
+    if (!environment?.polygonId) {
+      return
+    }
+
+    handleSelectEnvironment(environment.id)
+    setPolygonFocusRequest({
+      polygonId: environment.polygonId,
+      token: Date.now(),
+    })
+  }
+
   const handleSelectEnvironment = (environmentId) => {
     setSelectedEnvironmentId(environmentId)
     setSelectedEquipmentId(null)
@@ -464,10 +525,12 @@ function App() {
     }
   }
 
-  const handleConcludeEnvironment = ({ name, environmentClass, ceilingHeight, color }) => {
+  const handleConcludeEnvironment = ({ name, environmentClass, ceilingHeight }) => {
     if (!pendingEnvironmentPolygon?.id) {
       return
     }
+
+    const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
 
     const nextEnvironment = {
       id: `ambiente-${Date.now()}-${Math.round(Math.random() * 1000)}`,
@@ -552,6 +615,8 @@ function App() {
               onRenameRequest={handleRenameRequestFromTree}
               onRenameCommit={handleRenameCommitFromTree}
               onRenameCancel={handleCancelRename}
+              onDeleteNode={handleDeleteNodeFromTree}
+              onFocusNode={handleFocusNodeFromTree}
             />
           ) : null}
         </aside>
@@ -602,6 +667,8 @@ function App() {
                 onPolygonSegmentCreated={handlePolygonSegmentCreated}
                 onPolygonCreated={handlePolygonCreated}
                 onPolygonDeleted={handlePolygonDeleted}
+                deletePolygonId={polygonDeleteRequestId}
+                focusPolygonRequest={polygonFocusRequest}
                 polygonColorById={polygonColorById}
                 polygonLabelById={polygonLabelById}
                 placedEquipments={placedEquipments}

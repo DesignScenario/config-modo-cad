@@ -8,7 +8,10 @@ const POLYGON_POINT_STROKE = 4
 const POLYGON_LINE_STROKE = 4
 const CLOSE_POLYGON_HIT_DISTANCE = 10
 const START_POINT_HIGHLIGHT_RADIUS = 10
-const POLYGON_LABEL_OFFSET = 8
+const POLYGON_LABEL_MARGIN = 4
+const POLYGON_LABEL_MAX_FONT_SIZE = 14
+const POLYGON_LABEL_MIN_FONT_SIZE = 10
+const POLYGON_LABEL_LINE_HEIGHT_RATIO = 1.2
 const EQUIPMENT_HOLD_TO_DRAG_MS = 180
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
@@ -99,16 +102,6 @@ function flattenPoints(points) {
   return points.flatMap((point) => [point.x, point.y])
 }
 
-function getPolygonTopLeft(points) {
-  return points.reduce(
-    (bounds, point) => ({
-      minX: Math.min(bounds.minX, point.x),
-      minY: Math.min(bounds.minY, point.y),
-    }),
-    { minX: Number.POSITIVE_INFINITY, minY: Number.POSITIVE_INFINITY },
-  )
-}
-
 function isPointInsidePolygon(point, polygonPoints) {
   let inside = false
 
@@ -189,6 +182,321 @@ function clampZoom(value) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
 }
 
+function getPolygonBounds(points) {
+  return points.reduce(
+    (bounds, point) => ({
+      minX: Math.min(bounds.minX, point.x),
+      maxX: Math.max(bounds.maxX, point.x),
+      minY: Math.min(bounds.minY, point.y),
+      maxY: Math.max(bounds.maxY, point.y),
+    }),
+    {
+      minX: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    },
+  )
+}
+
+function getPolygonVisualCenter(points) {
+  if (!points?.length) {
+    return { x: 0, y: 0 }
+  }
+
+  let signedArea = 0
+  let centerX = 0
+  let centerY = 0
+
+  for (let index = 0; index < points.length; index += 1) {
+    const currentPoint = points[index]
+    const nextPoint = points[(index + 1) % points.length]
+    const factor = currentPoint.x * nextPoint.y - nextPoint.x * currentPoint.y
+    signedArea += factor
+    centerX += (currentPoint.x + nextPoint.x) * factor
+    centerY += (currentPoint.y + nextPoint.y) * factor
+  }
+
+  if (Math.abs(signedArea) < 0.00001) {
+    const fallback = points.reduce(
+      (accumulator, point) => ({
+        x: accumulator.x + point.x,
+        y: accumulator.y + point.y,
+      }),
+      { x: 0, y: 0 },
+    )
+    return {
+      x: fallback.x / points.length,
+      y: fallback.y / points.length,
+    }
+  }
+
+  const areaFactor = 1 / (3 * signedArea)
+  return {
+    x: centerX * areaFactor,
+    y: centerY * areaFactor,
+  }
+}
+
+function measureLabelText(text, fontSize) {
+  if (typeof document === 'undefined') {
+    return text.length * fontSize * 0.58
+  }
+
+  const canvas = measureLabelText.canvas || document.createElement('canvas')
+  measureLabelText.canvas = canvas
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    return text.length * fontSize * 0.58
+  }
+
+  context.font = `${fontSize}px "Segoe UI Semibold", "Segoe UI", sans-serif`
+  return context.measureText(text).width
+}
+
+function breakLongToken(token, fontSize, maxWidth) {
+  if (measureLabelText(token, fontSize) <= maxWidth) {
+    return [token]
+  }
+
+  const pieces = []
+  let current = ''
+
+  token.split('').forEach((char) => {
+    const next = `${current}${char}`
+    if (current && measureLabelText(next, fontSize) > maxWidth) {
+      pieces.push(current)
+      current = char
+      return
+    }
+    current = next
+  })
+
+  if (current) {
+    pieces.push(current)
+  }
+
+  return pieces
+}
+
+function wrapLabelText(text, fontSize, maxWidth) {
+  const safeText = `${text ?? ''}`.trim()
+  const rawTokens = safeText.split(/\s+/).filter(Boolean)
+
+  if (!rawTokens.length) {
+    return ['']
+  }
+
+  const tokens = rawTokens.flatMap((token) => breakLongToken(token, fontSize, maxWidth))
+  const lines = []
+  let currentLine = ''
+
+  tokens.forEach((token) => {
+    const candidateLine = currentLine ? `${currentLine} ${token}` : token
+
+    if (!currentLine || measureLabelText(candidateLine, fontSize) <= maxWidth) {
+      currentLine = candidateLine
+      return
+    }
+
+    lines.push(currentLine)
+    currentLine = token
+  })
+
+  if (currentLine) {
+    lines.push(currentLine)
+  }
+
+  return lines
+}
+
+function createLabelLayout(text, maxWidth, maxHeight) {
+  const safeText = (text ?? '').trim()
+  const constrainedWidth = Math.max(1, maxWidth)
+  const constrainedHeight = Math.max(1, maxHeight)
+
+  for (let fontSize = POLYGON_LABEL_MAX_FONT_SIZE; fontSize >= POLYGON_LABEL_MIN_FONT_SIZE; fontSize -= 1) {
+    const lineHeight = Math.ceil(fontSize * POLYGON_LABEL_LINE_HEIGHT_RATIO)
+    const singleLineWidth = Math.ceil(measureLabelText(safeText, fontSize))
+
+    if (singleLineWidth <= constrainedWidth && lineHeight <= constrainedHeight) {
+      return {
+        fontSize,
+        lineHeight,
+        lines: [safeText],
+        width: singleLineWidth,
+        height: lineHeight,
+      }
+    }
+
+    const wrappedLines = wrapLabelText(safeText, fontSize, constrainedWidth)
+    const wrappedWidth = Math.ceil(
+      wrappedLines.reduce((maxWidthValue, line) =>
+        Math.max(maxWidthValue, measureLabelText(line, fontSize)), 0),
+    )
+    const wrappedHeight = wrappedLines.length * lineHeight
+
+    if (wrappedWidth <= constrainedWidth && wrappedHeight <= constrainedHeight) {
+      return {
+        fontSize,
+        lineHeight,
+        lines: wrappedLines,
+        width: wrappedWidth,
+        height: wrappedHeight,
+      }
+    }
+  }
+
+  return null
+}
+
+function canPlaceLabelBox(stagePoints, x, y, width, height) {
+  const samplePoints = [
+    { x, y },
+    { x: x + width, y },
+    { x, y: y + height },
+    { x: x + width, y: y + height },
+    { x: x + width / 2, y: y + height / 2 },
+  ]
+
+  return samplePoints.every((point) => isPointInsidePolygon(point, stagePoints))
+}
+
+function findFirstInsidePoint(stagePoints, bounds, margin) {
+  const scanStartX = Math.ceil(bounds.minX + margin)
+  const scanEndX = Math.floor(bounds.maxX - margin)
+  const scanStartY = Math.ceil(bounds.minY + margin)
+  const scanEndY = Math.floor(bounds.maxY - margin)
+
+  for (let y = scanStartY; y <= scanEndY; y += 1) {
+    for (let x = scanStartX; x <= scanEndX; x += 1) {
+      if (isPointInsidePolygon({ x, y }, stagePoints)) {
+        return { x, y }
+      }
+    }
+  }
+
+  return null
+}
+
+function findFirstPlacementForLayout(stagePoints, bounds, layout, margin) {
+  const scanStartX = Math.ceil(bounds.minX + margin)
+  const scanEndX = Math.floor(bounds.maxX - margin - layout.width)
+  const scanStartY = Math.ceil(bounds.minY + margin)
+  const scanEndY = Math.floor(bounds.maxY - margin - layout.height)
+
+  for (let y = scanStartY; y <= scanEndY; y += 1) {
+    for (let x = scanStartX; x <= scanEndX; x += 1) {
+      if (canPlaceLabelBox(stagePoints, x, y, layout.width, layout.height)) {
+        return { x, y }
+      }
+    }
+  }
+
+  return null
+}
+
+function getPolygonLabelPlacement(stagePoints, labelText, margin = POLYGON_LABEL_MARGIN) {
+  const safeLabel = `${labelText ?? ''}`.trim()
+
+  if (!stagePoints?.length) {
+    return {
+      x: 0,
+      y: 0,
+      fontSize: POLYGON_LABEL_MAX_FONT_SIZE,
+      lineHeight: Math.ceil(POLYGON_LABEL_MAX_FONT_SIZE * POLYGON_LABEL_LINE_HEIGHT_RATIO),
+      lines: [safeLabel],
+    }
+  }
+
+  const bounds = getPolygonBounds(stagePoints)
+  const boxMaxWidth = Math.max(8, Math.floor(bounds.maxX - bounds.minX - margin * 2))
+  const boxMaxHeight = Math.max(8, Math.floor(bounds.maxY - bounds.minY - margin * 2))
+
+  const topLeftCandidate = {
+    x: bounds.minX + margin,
+    y: bounds.minY + margin,
+  }
+
+  const firstInsidePoint = isPointInsidePolygon(topLeftCandidate, stagePoints)
+    ? topLeftCandidate
+    : findFirstInsidePoint(stagePoints, bounds, margin)
+
+  const anchoredX = firstInsidePoint?.x ?? topLeftCandidate.x
+  const anchoredY = firstInsidePoint?.y ?? topLeftCandidate.y
+  const anchoredMaxWidth = Math.max(8, Math.floor(bounds.maxX - margin - anchoredX))
+  const anchoredMaxHeight = Math.max(8, Math.floor(bounds.maxY - margin - anchoredY))
+  const anchoredLayout = createLabelLayout(safeLabel, anchoredMaxWidth, anchoredMaxHeight)
+
+  if (
+    anchoredLayout
+    && canPlaceLabelBox(stagePoints, anchoredX, anchoredY, anchoredLayout.width, anchoredLayout.height)
+  ) {
+    return {
+      x: anchoredX,
+      y: anchoredY,
+      ...anchoredLayout,
+    }
+  }
+
+  for (let fontSize = POLYGON_LABEL_MAX_FONT_SIZE; fontSize >= POLYGON_LABEL_MIN_FONT_SIZE; fontSize -= 1) {
+    const lineHeight = Math.ceil(fontSize * POLYGON_LABEL_LINE_HEIGHT_RATIO)
+    const fullLineWidth = Math.ceil(measureLabelText(safeLabel, fontSize))
+    const singleLineLayout = {
+      fontSize,
+      lineHeight,
+      lines: [safeLabel],
+      width: fullLineWidth,
+      height: lineHeight,
+    }
+    const wrappedLines = wrapLabelText(safeLabel, fontSize, boxMaxWidth)
+    const wrappedLayout = {
+      fontSize,
+      lineHeight,
+      lines: wrappedLines,
+      width: Math.ceil(
+        wrappedLines.reduce((maxWidthValue, line) =>
+          Math.max(maxWidthValue, measureLabelText(line, fontSize)), 0),
+      ),
+      height: wrappedLines.length * lineHeight,
+    }
+
+    const layoutCandidates = [singleLineLayout, wrappedLayout]
+
+    for (const layout of layoutCandidates) {
+      if (layout.width > boxMaxWidth || layout.height > boxMaxHeight) {
+        continue
+      }
+
+      const position = findFirstPlacementForLayout(stagePoints, bounds, layout, margin)
+      if (position) {
+        return {
+          x: position.x,
+          y: position.y,
+          ...layout,
+        }
+      }
+    }
+  }
+
+  const visualCenter = getPolygonVisualCenter(stagePoints)
+  const centerLayout = createLabelLayout(safeLabel, boxMaxWidth, boxMaxHeight)
+    ?? {
+      fontSize: POLYGON_LABEL_MIN_FONT_SIZE,
+      lineHeight: Math.ceil(POLYGON_LABEL_MIN_FONT_SIZE * POLYGON_LABEL_LINE_HEIGHT_RATIO),
+      lines: [safeLabel],
+      width: Math.ceil(measureLabelText(safeLabel, POLYGON_LABEL_MIN_FONT_SIZE)),
+      height: Math.ceil(POLYGON_LABEL_MIN_FONT_SIZE * POLYGON_LABEL_LINE_HEIGHT_RATIO),
+    }
+
+  return {
+    x: visualCenter.x - centerLayout.width / 2,
+    y: visualCenter.y - centerLayout.height / 2,
+    ...centerLayout,
+  }
+}
+
 function CadCanvas({
   activeTool,
   zoom,
@@ -199,6 +507,8 @@ function CadCanvas({
   onPolygonSegmentCreated,
   onPolygonCreated,
   onPolygonDeleted,
+  deletePolygonId,
+  focusPolygonRequest,
   polygonColorById,
   polygonLabelById,
   placedEquipments,
@@ -227,6 +537,7 @@ function CadCanvas({
   const equipmentRenameInputRef = useRef(null)
   const equipmentHoldTimerRef = useRef(null)
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 })
+  const lastFocusRequestTokenRef = useRef(null)
   const canvasRenameOpenedAtRef = useRef(0)
   const equipmentRenameOpenedAtRef = useRef(0)
   const size = useElementSize(containerRef)
@@ -544,6 +855,81 @@ function CadCanvas({
       }),
     )
   }, [polygonLabelById])
+
+  useEffect(() => {
+    if (!deletePolygonId) {
+      return
+    }
+
+    setPolygons((currentPolygons) =>
+      currentPolygons.filter((polygon) => polygon.id !== deletePolygonId),
+    )
+  }, [deletePolygonId])
+
+  useEffect(() => {
+    const polygonId = focusPolygonRequest?.polygonId
+    const requestToken = focusPolygonRequest?.token ?? polygonId
+
+    if (!polygonId || !baseFittedBackgroundImage || !canvasWidth || !canvasHeight) {
+      return
+    }
+
+    if (lastFocusRequestTokenRef.current === requestToken) {
+      return
+    }
+
+    const targetPolygon = polygons.find((polygon) => polygon.id === polygonId)
+
+    if (!targetPolygon?.points?.length) {
+      return
+    }
+
+    const polygonPointsAtCurrentZoom = targetPolygon.points.map((point) =>
+      normToStage(point, fittedBackgroundImage),
+    )
+    const currentBounds = getPolygonBounds(polygonPointsAtCurrentZoom)
+    const currentWidth = Math.max(1, currentBounds.maxX - currentBounds.minX)
+    const currentHeight = Math.max(1, currentBounds.maxY - currentBounds.minY)
+    const framePadding = 36
+    const availableWidth = Math.max(40, canvasWidth - framePadding * 2)
+    const availableHeight = Math.max(40, canvasHeight - framePadding * 2)
+    const fitScale = Math.min(availableWidth / currentWidth, availableHeight / currentHeight)
+    const nextZoom = clampZoom(Math.round(zoom * fitScale))
+
+    const nextZoomScale = nextZoom / 100
+    const nextFrame = {
+      x: canvasWidth / 2 - (baseFittedBackgroundImage.width * nextZoomScale) / 2,
+      y: canvasHeight / 2 - (baseFittedBackgroundImage.height * nextZoomScale) / 2,
+      width: baseFittedBackgroundImage.width * nextZoomScale,
+      height: baseFittedBackgroundImage.height * nextZoomScale,
+      center: { x: canvasWidth / 2, y: canvasHeight / 2 },
+      rotation: normalizedRotation,
+    }
+
+    const polygonPointsNoPan = targetPolygon.points.map((point) => normToStage(point, nextFrame))
+    const nextBounds = getPolygonBounds(polygonPointsNoPan)
+    const polygonCenter = {
+      x: (nextBounds.minX + nextBounds.maxX) / 2,
+      y: (nextBounds.minY + nextBounds.maxY) / 2,
+    }
+
+    onZoomChange?.(nextZoom)
+    setPanOffset({
+      x: canvasWidth / 2 - polygonCenter.x,
+      y: canvasHeight / 2 - polygonCenter.y,
+    })
+    lastFocusRequestTokenRef.current = requestToken
+  }, [
+    focusPolygonRequest,
+    polygons,
+    baseFittedBackgroundImage,
+    canvasWidth,
+    canvasHeight,
+    fittedBackgroundImage,
+    normalizedRotation,
+    onZoomChange,
+    zoom,
+  ])
 
   const handleStageMouseDown = () => {
     if (activeTool === 'select') {
@@ -916,6 +1302,16 @@ function CadCanvas({
 
   const stageWidth = size.width || 1
   const stageHeight = size.height || 1
+  const polygonLabelPlacementById = useMemo(() => {
+    const placements = {}
+
+    polygons.forEach((polygon) => {
+      const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
+      placements[polygon.id] = getPolygonLabelPlacement(stagePoints, polygon.label)
+    })
+
+    return placements
+  }, [polygons, fittedBackgroundImage])
 
   return (
     <div
@@ -1207,11 +1603,9 @@ function CadCanvas({
       {renamingPolygonId ? (() => {
         const polygon = polygons.find((p) => p.id === renamingPolygonId)
         if (!polygon) return null
-
-        const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
-        const topLeft = getPolygonTopLeft(stagePoints)
-        const pixelX = topLeft.minX + POLYGON_LABEL_OFFSET
-        const pixelY = topLeft.minY + POLYGON_LABEL_OFFSET
+        const placement = polygonLabelPlacementById[polygon.id] ?? { x: 0, y: 0 }
+        const pixelX = placement.x
+        const pixelY = placement.y
 
         return (
           <input
@@ -1248,17 +1642,26 @@ function CadCanvas({
         if (!polygon.label) {
           return null
         }
-
-        const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
-        const topLeft = getPolygonTopLeft(stagePoints)
-        const pixelX = topLeft.minX + POLYGON_LABEL_OFFSET
-        const pixelY = topLeft.minY + POLYGON_LABEL_OFFSET
+        const placement = polygonLabelPlacementById[polygon.id] ?? {
+          x: 0,
+          y: 0,
+          fontSize: POLYGON_LABEL_MAX_FONT_SIZE,
+          lineHeight: Math.ceil(POLYGON_LABEL_MAX_FONT_SIZE * POLYGON_LABEL_LINE_HEIGHT_RATIO),
+          lines: [polygon.label],
+        }
+        const pixelX = placement.x
+        const pixelY = placement.y
 
         return (
           <div
             key={`polygon-label-${polygon.id}`}
             className="cad-polygon-label"
-            style={{ left: pixelX, top: pixelY }}
+            style={{
+              left: pixelX,
+              top: pixelY,
+              fontSize: `${placement.fontSize}px`,
+              lineHeight: `${placement.lineHeight}px`,
+            }}
             onMouseDown={(event) => {
               if (activeTool !== 'select') return
               event.stopPropagation()
@@ -1270,7 +1673,7 @@ function CadCanvas({
               onLabelDoubleClick?.(polygon.id)
             }}
           >
-            {polygon.label}
+            {placement.lines.join('\n')}
           </div>
         )
       })}
