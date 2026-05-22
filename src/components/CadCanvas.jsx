@@ -1,5 +1,6 @@
 import { Circle, Group, Layer, Line, Rect, Stage, Image as KonvaImage } from 'react-konva'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import apagarProjeto from '../assets/apagar-projeto.svg'
 
 const POLYGON_COLOR = '#FFD65B'
 const SELECTED_POLYGON_COLOR = '#0D99FF'
@@ -251,7 +252,7 @@ function measureLabelText(text, fontSize) {
     return text.length * fontSize * 0.58
   }
 
-  context.font = `${fontSize}px "Segoe UI Semibold", "Segoe UI", sans-serif`
+  context.font = `${fontSize}px "Segoe UI", sans-serif`
   return context.measureText(text).width
 }
 
@@ -523,6 +524,10 @@ function CadCanvas({
   selectedPolygonId,
   onEquipmentSelect,
   onPolygonSelect,
+  onPolygonContextMenu,
+  onPolygonEditRequest,
+  onPolygonRenameRequest,
+  onPolygonDeleteRequest,
   onCanvasBackgroundClick,
   onLabelClick,
   onLabelDoubleClick,
@@ -530,6 +535,7 @@ function CadCanvas({
   onEquipmentLabelDoubleClick,
   onEquipmentLabelRenameCommit,
   onCancelRename,
+  onPolygonTranslated,
 }) {
   const containerRef = useRef(null)
   const stageRef = useRef(null)
@@ -551,6 +557,10 @@ function CadCanvas({
   const [rectDraftStart, setRectDraftStart] = useState(null)
   const [rectDraftCursor, setRectDraftCursor] = useState(null)
   const [draggingEquipment, setDraggingEquipment] = useState(null)
+  const [draggingPolygon, setDraggingPolygon] = useState(null)
+  const [polygonContextMenu, setPolygonContextMenu] = useState(null)
+  const [polygonRenameDraft, setPolygonRenameDraft] = useState('')
+  const [equipmentRenameDraft, setEquipmentRenameDraft] = useState('')
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [isMiddlePanning, setIsMiddlePanning] = useState(false)
   const loadedBackgroundImage = useLoadedImage(backgroundImage)
@@ -656,29 +666,35 @@ function CadCanvas({
 
   useEffect(() => {
     if (!renamingPolygonId) {
+      setPolygonRenameDraft('')
       return
     }
 
     canvasRenameOpenedAtRef.current = Date.now()
+    const polygon = polygons.find((currentPolygon) => currentPolygon.id === renamingPolygonId)
+    setPolygonRenameDraft(polygon?.label ?? '')
     const input = canvasRenameInputRef.current
     if (input) {
       input.focus()
       input.select()
     }
-  }, [renamingPolygonId])
+  }, [polygons, renamingPolygonId])
 
   useEffect(() => {
     if (!renamingEquipmentId) {
+      setEquipmentRenameDraft('')
       return
     }
 
     equipmentRenameOpenedAtRef.current = Date.now()
+    const equipment = placedEquipments.find((currentEquipment) => currentEquipment.id === renamingEquipmentId)
+    setEquipmentRenameDraft(equipment?.label ?? '')
     const input = equipmentRenameInputRef.current
     if (input) {
       input.focus()
       input.select()
     }
-  }, [renamingEquipmentId])
+  }, [placedEquipments, renamingEquipmentId])
 
   // Sync editing value when rename starts from outside (tree click).
   // Delete selected polygon on Delete/Backspace key (select tool only).
@@ -735,6 +751,30 @@ function CadCanvas({
       window.removeEventListener('keydown', handleEscape)
     }
   }, [activeTool])
+
+  useEffect(() => {
+    const handleCloseContextMenu = () => {
+      setPolygonContextMenu(null)
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setPolygonContextMenu(null)
+      }
+    }
+
+    window.addEventListener('pointerdown', handleCloseContextMenu)
+    window.addEventListener('resize', handleCloseContextMenu)
+    window.addEventListener('scroll', handleCloseContextMenu, true)
+    window.addEventListener('keydown', handleEscape)
+
+    return () => {
+      window.removeEventListener('pointerdown', handleCloseContextMenu)
+      window.removeEventListener('resize', handleCloseContextMenu)
+      window.removeEventListener('scroll', handleCloseContextMenu, true)
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [])
 
   useEffect(() => {
     setScaleReferenceSegment(null)
@@ -801,6 +841,84 @@ function CadCanvas({
       window.removeEventListener('pointerup', handlePointerUp)
     }
   }, [draggingEquipment, fittedBackgroundImage, onEquipmentMove, polygons])
+  useEffect(() => {
+    if (!draggingPolygon || !fittedBackgroundImage) {
+      return undefined
+    }
+
+    const handlePointerMove = (event) => {
+      const container = containerRef.current
+      if (!container) {
+        return
+      }
+
+      const containerRect = container.getBoundingClientRect()
+      const currentStagePoint = {
+        x: event.clientX - containerRect.left,
+        y: event.clientY - containerRect.top,
+      }
+      const stageDelta = {
+        x: currentStagePoint.x - draggingPolygon.startStagePoint.x,
+        y: currentStagePoint.y - draggingPolygon.startStagePoint.y,
+      }
+
+      setDraggingPolygon((currentDrag) => (currentDrag
+        ? {
+            ...currentDrag,
+            stageDelta,
+          }
+        : null))
+
+      setPolygons((currentPolygons) =>
+        currentPolygons.map((polygon) => {
+          if (polygon.id !== draggingPolygon.polygonId) {
+            return polygon
+          }
+
+          return {
+            ...polygon,
+            points: draggingPolygon.initialPolygonPoints.map((point) =>
+              stageToNorm(
+                {
+                  x: normToStage(point, fittedBackgroundImage).x + stageDelta.x,
+                  y: normToStage(point, fittedBackgroundImage).y + stageDelta.y,
+                },
+                fittedBackgroundImage,
+              ),
+            ),
+          }
+        }),
+      )
+    }
+
+    const handlePointerUp = () => {
+      if (draggingPolygon.stageDelta.x || draggingPolygon.stageDelta.y) {
+        onPolygonTranslated?.({
+          polygonId: draggingPolygon.polygonId,
+          equipmentPoints: draggingPolygon.initialEquipmentPoints.map((equipment) => ({
+            equipmentId: equipment.id,
+            point: stageToNorm(
+              {
+                x: normToStage(equipment.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
+                y: normToStage(equipment.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+              },
+              fittedBackgroundImage,
+            ),
+          })),
+        })
+      }
+
+      setDraggingPolygon(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggingPolygon, fittedBackgroundImage, onPolygonTranslated])
 
   useEffect(() => {
     if (!isMiddlePanning) {
@@ -1051,7 +1169,54 @@ function CadCanvas({
 
     event.cancelBubble = true
     onEquipmentSelect?.(null)
+
+    if (selectedPolygonId === polygonId && event.evt.button === 0) {
+      const stagePoint = toStagePoint(stageRef.current)
+      const polygon = polygons.find((currentPolygon) => currentPolygon.id === polygonId)
+
+      if (stagePoint && polygon) {
+        setDraggingPolygon({
+          polygonId,
+          startStagePoint: stagePoint,
+          stageDelta: { x: 0, y: 0 },
+          initialPolygonPoints: polygon.points,
+          initialEquipmentPoints: (placedEquipments ?? [])
+            .filter((equipment) => equipment.polygonId === polygonId)
+            .map((equipment) => ({ id: equipment.id, point: equipment.point })),
+        })
+      }
+    }
+
     onPolygonSelect?.(polygonId)
+  }
+
+  const openPolygonContextMenu = (event, polygonId) => {
+    if (activeTool !== 'select') {
+      return
+    }
+
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+
+    event.evt.preventDefault()
+    event.cancelBubble = true
+
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 172
+    const menuHeight = 92
+    const x = Math.min(event.evt.clientX - bounds.left, bounds.width - menuWidth - 4)
+    const y = Math.min(event.evt.clientY - bounds.top, bounds.height - menuHeight - 4)
+
+    onEquipmentSelect?.(null)
+    onPolygonContextMenu?.(polygonId)
+    onPolygonSelect?.(polygonId)
+    setPolygonContextMenu({
+      polygonId,
+      x: Math.max(4, x),
+      y: Math.max(4, y),
+    })
   }
 
   const handleEquipmentMouseDown = (event, equipment) => {
@@ -1302,6 +1467,14 @@ function CadCanvas({
 
   const stageWidth = size.width || 1
   const stageHeight = size.height || 1
+  const polygonRenameInputWidth = useMemo(
+    () => Math.max(18, Math.ceil(measureLabelText(polygonRenameDraft || ' ', 14)) + 12),
+    [polygonRenameDraft],
+  )
+  const equipmentRenameInputWidth = useMemo(
+    () => Math.max(16, Math.ceil(measureLabelText(equipmentRenameDraft || ' ', 11)) + 10),
+    [equipmentRenameDraft],
+  )
   const polygonLabelPlacementById = useMemo(() => {
     const placements = {}
 
@@ -1315,13 +1488,14 @@ function CadCanvas({
 
   return (
     <div
-      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}`}
+      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${activeTool === 'rectangle' || activeTool === 'polygon' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}`}
       ref={containerRef}
       onMouseDownCapture={handleCanvasMouseDownCapture}
       onAuxClick={handleCanvasAuxClick}
       onWheel={handleCanvasWheel}
       onDragOver={handleDragOverCanvas}
       onDrop={handleDropOnCanvas}
+      onContextMenu={(event) => event.preventDefault()}
     >
       <div className="cad-canvas-surface">
         <Stage
@@ -1368,6 +1542,7 @@ function CadCanvas({
                     lineCap="round"
                     lineJoin="round"
                     onMouseDown={(event) => handlePolygonMouseDown(event, polygon.id)}
+                    onContextMenu={(event) => openPolygonContextMenu(event, polygon.id)}
                   />
 
                   {isSelected
@@ -1566,7 +1741,9 @@ function CadCanvas({
               <input
                 ref={equipmentRenameInputRef}
                 className="cad-equipment-placement__input"
-                defaultValue={equipment.label}
+                style={{ width: `${equipmentRenameInputWidth}px` }}
+                value={equipmentRenameDraft}
+                onChange={(event) => setEquipmentRenameDraft(event.currentTarget.value)}
                 onMouseDown={(event) => event.stopPropagation()}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -1611,9 +1788,10 @@ function CadCanvas({
           <input
             ref={canvasRenameInputRef}
             className="cad-canvas-label-input"
-            style={{ left: pixelX, top: pixelY }}
+            style={{ left: pixelX, top: pixelY, width: `${polygonRenameInputWidth}px` }}
             key={renamingPolygonId}
-            defaultValue={polygon.label}
+            value={polygonRenameDraft}
+            onChange={(event) => setPolygonRenameDraft(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 onLabelRenameCommit?.(renamingPolygonId, event.currentTarget.value)
@@ -1667,6 +1845,31 @@ function CadCanvas({
               event.stopPropagation()
               onLabelClick?.(polygon.id)
             }}
+            onContextMenu={(event) => {
+              if (activeTool !== 'select') return
+              event.preventDefault()
+              event.stopPropagation()
+
+              const container = containerRef.current
+              if (!container) {
+                return
+              }
+
+              const bounds = container.getBoundingClientRect()
+              const menuWidth = 172
+              const menuHeight = 92
+              const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
+              const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
+
+              onEquipmentSelect?.(null)
+              onPolygonContextMenu?.(polygon.id)
+              onLabelClick?.(polygon.id)
+              setPolygonContextMenu({
+                polygonId: polygon.id,
+                x: Math.max(4, x),
+                y: Math.max(4, y),
+              })
+            }}
             onDoubleClick={(event) => {
               if (activeTool !== 'select') return
               event.stopPropagation()
@@ -1677,6 +1880,48 @@ function CadCanvas({
           </div>
         )
       })}
+
+      {polygonContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${polygonContextMenu.x}px`, top: `${polygonContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onPolygonRenameRequest?.(polygonContextMenu.polygonId)
+              setPolygonContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Renomear</span>
+          </button>
+
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onPolygonEditRequest?.(polygonContextMenu.polygonId)
+              setPolygonContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Editar</span>
+          </button>
+
+          <button
+            type="button"
+            className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+            onClick={() => {
+              onPolygonDeleteRequest?.(polygonContextMenu.polygonId)
+              setPolygonContextMenu(null)
+            }}
+          >
+            <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+            <span className="cad-tree-context-menu__label">Excluir</span>
+          </button>
+        </div>
+      ) : null}
 
     </div>
   )

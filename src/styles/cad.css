@@ -471,9 +471,13 @@ body.is-dragging-overlay * {
   left: 12px;
   z-index: 11;
   color: #7d8490;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   white-space: nowrap;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 3px;
+  padding: 2px 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
 
@@ -485,10 +489,10 @@ body.is-dragging-overlay * {
   border-radius: 2px;
   padding: 0 4px;
   font-size: 14px;
-  font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI', sans-serif;
+  font-weight: 400;
   color: #1f1f1f;
   height: 22px;
-  min-width: 80px;
   outline: none;
   box-shadow: 0 0 0 2px rgba(13, 153, 255, 0.2);
   pointer-events: auto;
@@ -770,6 +774,11 @@ body.is-dragging-overlay * {
   cursor: grab;
 }
 
+.cad-canvas-shell.is-draw-tool,
+.cad-canvas-shell.is-draw-tool .konvajs-content {
+  cursor: crosshair;
+}
+
 .cad-canvas-surface {
   position: absolute;
   inset: 0;
@@ -1033,7 +1042,6 @@ body.is-dragging-overlay * {
   top: 50%;
   transform: translateY(-50%);
   height: 18px;
-  max-width: 160px;
   border: 1px solid #0d99ff;
   border-radius: 2px;
   background: #ffffff;
@@ -1048,15 +1056,35 @@ body.is-dragging-overlay * {
   position: absolute;
   transform: translate(0, 0);
   font-size: 14px;
-  font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI', sans-serif;
+  font-weight: 400;
   white-space: pre-line;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.72);
   color: #1f1f1f;
+  text-shadow:
+    -1px 0 0 rgba(255, 255, 255, 0.95),
+    1px 0 0 rgba(255, 255, 255, 0.95),
+    0 -1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 2px rgba(255, 255, 255, 0.9);
   pointer-events: auto;
   user-select: none;
   z-index: 6;
 }
 
 .cad-scale-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 8;
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+}
+
+.cad-environment-overlay-backdrop {
   position: absolute;
   inset: 0;
   display: grid;

@@ -10,7 +10,7 @@ function ScaleSetupOverlay({ onStart }) {
 
         <div className="cad-scale-overlay__content">
           <p className="cad-scale-overlay__text">
-            Desenhe uma linha na planta baixa e informe a distancia real correspondente para definir a escala.
+            Desenhe uma linha na planta baixa e informe a distância real correspondente para definir a escala.
           </p>
 
           <button type="button" className="cad-scale-overlay__start-btn" onClick={onStart}>

@@ -29,7 +29,7 @@ function ScaleValueOverlay({ onConclude }) {
 
         <form className="cad-scale-overlay__content cad-scale-overlay__content--value" onSubmit={handleSubmit}>
           <p className="cad-scale-overlay__text cad-scale-overlay__text--center">
-            Informe a distancia real correspondente em metros
+            Informe a distância real correspondente em metros
           </p>
 
           <input

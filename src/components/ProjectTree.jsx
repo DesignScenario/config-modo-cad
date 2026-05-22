@@ -175,6 +175,7 @@ function ProjectTree({
   onRenameCommit,
   onRenameCancel,
   onDeleteNode,
+  onEditNode,
   onFocusNode,
 }) {
   const [query, setQuery] = useState('')
@@ -251,7 +252,7 @@ function ProjectTree({
 
     const bounds = container.getBoundingClientRect()
     const menuWidth = 172
-    const menuHeight = 64
+    const menuHeight = 92
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
 
@@ -344,6 +345,17 @@ function ProjectTree({
               }}
             >
               <span className="cad-tree-context-menu__label">Renomear</span>
+            </button>
+
+            <button
+              type="button"
+              className="cad-tree-context-menu__item"
+              onClick={() => {
+                onEditNode?.(contextMenu.node)
+                setContextMenu(null)
+              }}
+            >
+              <span className="cad-tree-context-menu__label">Editar</span>
             </button>
 
             <button

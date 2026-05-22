@@ -62,6 +62,7 @@ function EnvironmentInfoOverlay({
   suggestedName,
   classOptions,
   defaultCeilingHeight,
+  initialClass,
   onConclude,
 }) {
   const classes = useMemo(
@@ -70,11 +71,23 @@ function EnvironmentInfoOverlay({
   )
 
   const [name, setName] = useState(suggestedName)
-  const [environmentClass, setEnvironmentClass] = useState(classes[0])
+  const [environmentClass, setEnvironmentClass] = useState(initialClass || classes[0])
   const [ceilingHeight, setCeilingHeight] = useState(defaultCeilingHeight || '3')
   const [isNameMenuOpen, setIsNameMenuOpen] = useState(false)
   const nameMenuRef = useRef(null)
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
+
+  useEffect(() => {
+    setName(suggestedName)
+  }, [suggestedName])
+
+  useEffect(() => {
+    setEnvironmentClass(initialClass || classes[0])
+  }, [classes, initialClass])
+
+  useEffect(() => {
+    setCeilingHeight(defaultCeilingHeight || '3')
+  }, [defaultCeilingHeight])
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -104,7 +117,7 @@ function EnvironmentInfoOverlay({
   }
 
   return (
-    <div className="cad-scale-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Informações do Ambiente">
+    <div className="cad-environment-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Informações do Ambiente">
       <form className="cad-environment-overlay" ref={panelRef} style={panelStyle} onSubmit={handleSubmit}>
         <header className="cad-environment-overlay__header" onPointerDown={onHandlePointerDown}>Informações do Ambiente</header>
 

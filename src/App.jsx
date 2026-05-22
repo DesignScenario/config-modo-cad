@@ -138,6 +138,7 @@ function App() {
   const [projectTree, setProjectTree] = useState(() => cloneProjectTree(initialProject))
   const [showEnvironmentOverlay, setShowEnvironmentOverlay] = useState(false)
   const [pendingEnvironmentPolygon, setPendingEnvironmentPolygon] = useState(null)
+  const [editingEnvironmentId, setEditingEnvironmentId] = useState(null)
   const [environmentClassOptions] = useState(ENVIRONMENT_CLASS_OPTIONS)
   const [polygonColorById, setPolygonColorById] = useState({})
   const [environments, setEnvironments] = useState([])
@@ -223,6 +224,7 @@ function App() {
     setProjectTree(cloneProjectTree(initialProject))
     setShowEnvironmentOverlay(false)
     setPendingEnvironmentPolygon(null)
+    setEditingEnvironmentId(null)
     setPolygonColorById({})
     setEnvironments([])
     setPlacedEquipments([])
@@ -287,12 +289,14 @@ function App() {
 
   const handlePolygonCreated = (polygon) => {
     setPendingEnvironmentPolygon(polygon)
+    setEditingEnvironmentId(null)
     setShowEnvironmentOverlay(true)
     setActiveTool('select')
   }
 
   const handlePolygonDeleted = (polygonId) => {
     const env = environments.find((e) => e.polygonId === polygonId)
+    const isDeletedEditingEnvironment = env?.id === editingEnvironmentId
     const removedEquipmentIds = placedEquipments
       .filter((equipment) => equipment.polygonId === polygonId)
       .map((equipment) => equipment.id)
@@ -306,6 +310,8 @@ function App() {
     if (env) {
       setProjectTree((curr) => removeNodeById(curr, env.id))
     }
+    setEditingEnvironmentId((currentEditingId) => (env?.id === currentEditingId ? null : currentEditingId))
+    setShowEnvironmentOverlay((currentVisible) => (isDeletedEditingEnvironment ? false : currentVisible))
     setSelectedEnvironmentId((currentSelectedId) => (env?.id === currentSelectedId ? null : currentSelectedId))
     setSelectedEquipmentId((currentSelectedId) =>
       removedEquipmentIds.includes(currentSelectedId) ? null : currentSelectedId,
@@ -385,6 +391,30 @@ function App() {
     }
   }
 
+  const handlePolygonTranslated = ({ polygonId, equipmentPoints }) => {
+    if (!polygonId || !equipmentPoints?.length) {
+      return
+    }
+
+    const translatedPointByEquipmentId = Object.fromEntries(
+      equipmentPoints.map(({ equipmentId, point }) => [equipmentId, point]),
+    )
+
+    setPlacedEquipments((currentEquipments) =>
+      currentEquipments.map((equipment) => {
+        const nextPoint = translatedPointByEquipmentId[equipment.id]
+        if (!nextPoint || equipment.polygonId !== polygonId) {
+          return equipment
+        }
+
+        return {
+          ...equipment,
+          point: nextPoint,
+        }
+      }),
+    )
+  }
+
   const handleDeleteEquipment = (equipmentId) => {
     setPlacedEquipments((currentEquipments) =>
       currentEquipments.filter((equipment) => equipment.id !== equipmentId),
@@ -412,6 +442,27 @@ function App() {
 
     setPolygonDeleteRequestId(environment.polygonId)
     handlePolygonDeleted(environment.polygonId)
+  }
+
+  const handleEditEnvironmentRequest = (environmentId) => {
+    const environment = environments.find((currentEnvironment) => currentEnvironment.id === environmentId)
+
+    if (!environment) {
+      return
+    }
+
+    handleSelectEnvironment(environment.id)
+    setPendingEnvironmentPolygon(null)
+    setEditingEnvironmentId(environment.id)
+    setShowEnvironmentOverlay(true)
+  }
+
+  const handleEditNodeRequest = (node) => {
+    if (node?.source !== 'created-environment') {
+      return
+    }
+
+    handleEditEnvironmentRequest(node.id)
   }
 
   const handleFocusNodeFromTree = (node) => {
@@ -526,6 +577,38 @@ function App() {
   }
 
   const handleConcludeEnvironment = ({ name, environmentClass, ceilingHeight }) => {
+    if (editingEnvironmentId) {
+      const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
+
+      setEnvironments((currentEnvironments) =>
+        currentEnvironments.map((environment) =>
+          environment.id === editingEnvironmentId
+            ? {
+                ...environment,
+                name,
+                environmentClass,
+                ceilingHeight,
+                color,
+              }
+            : environment,
+        ),
+      )
+
+      const editedEnvironment = environments.find((environment) => environment.id === editingEnvironmentId)
+      if (editedEnvironment?.polygonId) {
+        setPolygonColorById((currentColors) => ({
+          ...currentColors,
+          [editedEnvironment.polygonId]: color,
+        }))
+      }
+
+      setDefaultCeilingHeight(ceilingHeight)
+      setProjectTree((currentTree) => updateNodeLabel(currentTree, editingEnvironmentId, name))
+      setEditingEnvironmentId(null)
+      setShowEnvironmentOverlay(false)
+      return
+    }
+
     if (!pendingEnvironmentPolygon?.id) {
       return
     }
@@ -556,6 +639,7 @@ function App() {
       }),
     )
     setPendingEnvironmentPolygon(null)
+    setEditingEnvironmentId(null)
     setShowEnvironmentOverlay(false)
   }
 
@@ -564,6 +648,7 @@ function App() {
     : 'Escala nao definida'
 
   const nextEnvironmentName = `Ambiente ${environments.length + 1}`
+  const editingEnvironment = environments.find((environment) => environment.id === editingEnvironmentId) ?? null
   const polygonLabelById = environments.reduce((accumulator, environment) => {
     accumulator[environment.polygonId] = environment.name
     return accumulator
@@ -616,6 +701,7 @@ function App() {
               onRenameCommit={handleRenameCommitFromTree}
               onRenameCancel={handleCancelRename}
               onDeleteNode={handleDeleteNodeFromTree}
+              onEditNode={handleEditNodeRequest}
               onFocusNode={handleFocusNodeFromTree}
             />
           ) : null}
@@ -676,6 +762,7 @@ function App() {
                 clearScaleReferenceToken={clearScaleReferenceToken}
                 onEquipmentDrop={handleEquipmentDropped}
                 onEquipmentMove={handleEquipmentMoved}
+                onPolygonTranslated={handlePolygonTranslated}
                 onEquipmentDelete={handleDeleteEquipment}
                 selectedEquipmentId={selectedEquipmentId}
                 renamingEquipmentId={renamingEquipmentCanvasId}
@@ -686,6 +773,31 @@ function App() {
                   const env = environments.find((environment) => environment.polygonId === polygonId)
                   if (env) {
                     handleSelectEnvironment(env.id)
+                  }
+                }}
+                onPolygonContextMenu={(polygonId) => {
+                  const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
+                  if (environment) {
+                    handleSelectEnvironment(environment.id)
+                  }
+                }}
+                onPolygonEditRequest={(polygonId) => {
+                  const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
+                  if (environment) {
+                    handleEditEnvironmentRequest(environment.id)
+                  }
+                }}
+                onPolygonRenameRequest={(polygonId) => {
+                  const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
+                  if (environment) {
+                    handleStartRename(environment.id, 'canvas')
+                  }
+                }}
+                onPolygonDeleteRequest={(polygonId) => {
+                  const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
+                  if (environment) {
+                    setPolygonDeleteRequestId(environment.polygonId)
+                    handlePolygonDeleted(environment.polygonId)
                   }
                 }}
                 onCanvasBackgroundClick={() => {
@@ -713,9 +825,10 @@ function App() {
               {showScaleValueOverlay ? <ScaleValueOverlay onConclude={handleConcludeScale} /> : null}
               {showEnvironmentOverlay ? (
                 <EnvironmentInfoOverlay
-                  suggestedName={nextEnvironmentName}
+                  suggestedName={editingEnvironment?.name ?? nextEnvironmentName}
                   classOptions={environmentClassOptions}
-                  defaultCeilingHeight={defaultCeilingHeight}
+                  defaultCeilingHeight={editingEnvironment?.ceilingHeight ?? defaultCeilingHeight}
+                  initialClass={editingEnvironment?.environmentClass}
                   onConclude={handleConcludeEnvironment}
                 />
               ) : null}
