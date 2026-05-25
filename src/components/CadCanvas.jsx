@@ -16,6 +16,7 @@ const POLYGON_LABEL_LINE_HEIGHT_RATIO = 1.2
 const EQUIPMENT_HOLD_TO_DRAG_MS = 180
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
+const MULTI_ADD_PREVIEW_COLOR = '#0D99FF'
 
 function hexToRgba(hexColor, alpha) {
   const sanitized = hexColor.replace('#', '')
@@ -181,6 +182,24 @@ function normToStage(normPoint, fittedImage) {
 
 function clampZoom(value) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+}
+
+function distributePointsBetween(startPoint, endPoint, quantity) {
+  if (!startPoint || !endPoint || quantity <= 0) {
+    return []
+  }
+
+  if (quantity === 1) {
+    return [startPoint]
+  }
+
+  return Array.from({ length: quantity }, (_, index) => {
+    const factor = index / (quantity - 1)
+    return {
+      x: startPoint.x + (endPoint.x - startPoint.x) * factor,
+      y: startPoint.y + (endPoint.y - startPoint.y) * factor,
+    }
+  })
 }
 
 function getPolygonBounds(points) {
@@ -518,6 +537,9 @@ function CadCanvas({
   clearScaleReferenceToken,
   onEquipmentDrop,
   onEquipmentMove,
+  multiAddPlacementRequest,
+  onMultiAddPlacementCommit,
+  onMultiAddPlacementCancel,
   onEquipmentDelete,
   selectedEquipmentId,
   renamingEquipmentId,
@@ -559,6 +581,7 @@ function CadCanvas({
   const [rectDraftCursor, setRectDraftCursor] = useState(null)
   const [draggingEquipment, setDraggingEquipment] = useState(null)
   const [draggingPolygon, setDraggingPolygon] = useState(null)
+  const [multiAddDraft, setMultiAddDraft] = useState(null)
   const [polygonContextMenu, setPolygonContextMenu] = useState(null)
   const [polygonRenameDraft, setPolygonRenameDraft] = useState('')
   const [equipmentRenameDraft, setEquipmentRenameDraft] = useState('')
@@ -648,6 +671,61 @@ function CadCanvas({
   }, [activeTool, onEquipmentSelect])
 
   useEffect(() => {
+    if (!multiAddPlacementRequest?.equipment || !multiAddPlacementRequest?.quantity) {
+      setMultiAddDraft(null)
+      return
+    }
+
+    setMultiAddDraft({
+      token: multiAddPlacementRequest.token,
+      quantity: Math.max(1, Number.parseInt(multiAddPlacementRequest.quantity, 10) || 1),
+      equipment: multiAddPlacementRequest.equipment,
+      firstPoint: null,
+      firstPolygonId: null,
+      cursorPoint: null,
+    })
+  }, [multiAddPlacementRequest])
+
+  useEffect(() => {
+    if (!multiAddDraft) {
+      return undefined
+    }
+
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      setMultiAddDraft(null)
+      onMultiAddPlacementCancel?.()
+    }
+
+    window.addEventListener('keydown', handleEscape)
+
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [multiAddDraft, onMultiAddPlacementCancel])
+
+  useEffect(() => {
+    if (!multiAddDraft || multiAddDraft.cursorPoint || !fittedBackgroundImage) {
+      return
+    }
+
+    const currentStagePoint = toStagePoint(stageRef.current)
+    if (!currentStagePoint) {
+      return
+    }
+
+    setMultiAddDraft((currentDraft) => (currentDraft
+      ? {
+          ...currentDraft,
+          cursorPoint: stageToNorm(currentStagePoint, fittedBackgroundImage),
+        }
+      : null))
+  }, [multiAddDraft, fittedBackgroundImage])
+
+  useEffect(() => {
     const handlePointerUp = () => {
       if (equipmentHoldTimerRef.current) {
         window.clearTimeout(equipmentHoldTimerRef.current)
@@ -710,8 +788,7 @@ function CadCanvas({
         }
 
         if (selectedPolygonId && !renamingPolygonId) {
-          setPolygons((curr) => curr.filter((p) => p.id !== selectedPolygonId))
-          onPolygonDeleted?.(selectedPolygonId)
+          onPolygonDeleteRequest?.(selectedPolygonId)
         }
       }
     }
@@ -725,7 +802,7 @@ function CadCanvas({
     selectedPolygonId,
     renamingPolygonId,
     onEquipmentDelete,
-    onPolygonDeleted,
+    onPolygonDeleteRequest,
   ])
 
   useEffect(() => {
@@ -1051,6 +1128,10 @@ function CadCanvas({
   ])
 
   const handleStageMouseDown = () => {
+    if (tryHandleMultiAddClick()) {
+      return
+    }
+
     if (activeTool === 'select') {
       onEquipmentSelect?.(null)
       onCanvasBackgroundClick?.()
@@ -1163,7 +1244,63 @@ function CadCanvas({
     setDraftPolygonPoints((currentPoints) => [...currentPoints, normPoint])
   }
 
+  const tryHandleMultiAddClick = (forcedPolygonId = null) => {
+    if (!multiAddDraft || !fittedBackgroundImage) {
+      return false
+    }
+
+    const stagePoint = toStagePoint(stageRef.current)
+
+    if (!stagePoint) {
+      return false
+    }
+
+    const targetPolygon = forcedPolygonId
+      ? polygons.find((polygon) => polygon.id === forcedPolygonId) ?? null
+      : [...polygons]
+          .reverse()
+          .find((polygon) => {
+            const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
+            return isPointInsidePolygon(stagePoint, stagePoints)
+          })
+
+    if (!targetPolygon) {
+      return true
+    }
+
+    const normPoint = stageToNorm(stagePoint, fittedBackgroundImage)
+
+    if (!multiAddDraft.firstPoint) {
+      setMultiAddDraft((currentDraft) => (currentDraft
+        ? {
+            ...currentDraft,
+            firstPoint: normPoint,
+            firstPolygonId: targetPolygon.id,
+            cursorPoint: normPoint,
+          }
+        : null))
+      return true
+    }
+
+    if (multiAddDraft.firstPolygonId !== targetPolygon.id) {
+      return true
+    }
+
+    onMultiAddPlacementCommit?.({
+      polygonId: targetPolygon.id,
+      equipment: multiAddDraft.equipment,
+      points: distributePointsBetween(multiAddDraft.firstPoint, normPoint, multiAddDraft.quantity),
+    })
+    setMultiAddDraft(null)
+    return true
+  }
+
   const handlePolygonMouseDown = (event, polygonId) => {
+    if (tryHandleMultiAddClick(polygonId)) {
+      event.cancelBubble = true
+      return
+    }
+
     if (activeTool !== 'select') {
       return
     }
@@ -1292,6 +1429,23 @@ function CadCanvas({
   }
 
   const handleStageMouseMove = () => {
+    if (multiAddDraft) {
+      const stage = stageRef.current
+      const rawPoint = toStagePoint(stage)
+
+      if (!rawPoint || !fittedBackgroundImage) {
+        return
+      }
+
+      setMultiAddDraft((currentDraft) => (currentDraft
+        ? {
+            ...currentDraft,
+            cursorPoint: stageToNorm(rawPoint, fittedBackgroundImage),
+          }
+        : null))
+      return
+    }
+
     if (activeTool === 'rectangle') {
       if (!hasScaleDefinition) return
       if (!rectDraftStart) return
@@ -1489,7 +1643,7 @@ function CadCanvas({
 
   return (
     <div
-      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${activeTool === 'rectangle' || activeTool === 'polygon' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}`}
+      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${activeTool === 'rectangle' || activeTool === 'polygon' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}${multiAddDraft ? ' is-multi-add' : ''}`}
       ref={containerRef}
       onMouseDownCapture={handleCanvasMouseDownCapture}
       onAuxClick={handleCanvasAuxClick}
@@ -1717,9 +1871,43 @@ function CadCanvas({
                 </>
               )
             })() : null}
+
+            {multiAddDraft?.firstPoint && multiAddDraft?.cursorPoint ? (() => {
+              const startStage = normToStage(multiAddDraft.firstPoint, fittedBackgroundImage)
+              const cursorStage = normToStage(multiAddDraft.cursorPoint, fittedBackgroundImage)
+
+              return (
+                <Line
+                  points={[startStage.x, startStage.y, cursorStage.x, cursorStage.y]}
+                  stroke={MULTI_ADD_PREVIEW_COLOR}
+                  strokeWidth={2}
+                  lineCap="round"
+                  lineJoin="round"
+                  dash={[6, 4]}
+                />
+              )
+            })() : null}
           </Layer>
         </Stage>
       </div>
+
+      {multiAddDraft?.cursorPoint ? (() => {
+        const cursorStage = normToStage(multiAddDraft.cursorPoint, fittedBackgroundImage)
+
+        return (
+          <div
+            className="cad-multi-add-cursor"
+            style={{ left: `${cursorStage.x}px`, top: `${cursorStage.y}px` }}
+          >
+            <img
+              src={multiAddDraft.equipment.iconSrc}
+              alt=""
+              className="cad-multi-add-cursor__icon"
+              draggable={false}
+            />
+          </div>
+        )
+      })() : null}
 
       {(placedEquipments ?? []).map((equipment) => {
         const visiblePoint = draggingEquipment?.id === equipment.id

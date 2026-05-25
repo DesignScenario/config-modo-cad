@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import AddMultipleItemsOverlay from './AddMultipleItemsOverlay.jsx'
 import camera from '../assets/câmera.svg'
 import circadiano from '../assets/circadiano.svg'
 import conexaoHardware from '../assets/conexão-hardware.svg'
@@ -33,6 +34,11 @@ import { equipmentLibraryTabs } from '../data/equipmentLibrary.js'
 import { useDraggable } from '../hooks/useDraggable.js'
 
 const TAB_NAMES = ['Ambiente', 'Scenario', 'Drivers']
+const MULTI_ADD_CONTEXT_LABEL = 'Adicionar múltiplos itens'
+const CONTEXT_MENU_EXCLUDED_LABELS = new Set([
+  '[ GENERICO ] SCENARIO - RF433',
+  '[ DISPOSITIVO DE AUDIO SEM CONTROLE ]',
+])
 
 const ICON_MAP = {
   camera,
@@ -90,9 +96,45 @@ function filterTree(nodes, query) {
     .filter(Boolean)
 }
 
-function EquipmentTreeNode({ item, level, expandedIds, onToggle }) {
+function findItemById(nodes, id) {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    if (node.children?.length) {
+      const found = findItemById(node.children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function shouldOpenMultiAddMenu(item) {
+  if (!item) {
+    return false
+  }
+
+  if (item.id === 'drv-automation' || item.id.startsWith('drv-automation-')) {
+    return false
+  }
+
+  if (CONTEXT_MENU_EXCLUDED_LABELS.has(item.label)) {
+    return false
+  }
+
+  return true
+}
+
+function EquipmentTreeNode({
+  item,
+  level,
+  expandedIds,
+  selectedItemId,
+  onToggle,
+  onSelect,
+  onItemContextMenu,
+}) {
   const hasChildren = Boolean(item.children?.length)
   const isExpanded = expandedIds.has(item.id)
+  const isSelected = selectedItemId === item.id
   const iconSrc = ICON_MAP[item.icon] ?? pasta
 
   const handleDragStart = (event) => {
@@ -116,8 +158,18 @@ function EquipmentTreeNode({ item, level, expandedIds, onToggle }) {
     <div className="cad-equip-tree-node" style={{ '--equip-level': level }}>
       <button
         type="button"
-        className={`cad-equip-tree-row${!hasChildren ? ' is-draggable' : ''}`}
-        onClick={() => (hasChildren ? onToggle(item.id) : undefined)}
+        className={`cad-equip-tree-row${isSelected ? ' is-selected' : ''}${!hasChildren ? ' is-draggable' : ''}`}
+        onClick={() => {
+          onSelect(item)
+          if (hasChildren) {
+            onToggle(item.id)
+          }
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onItemContextMenu(event, item)
+        }}
         draggable={!hasChildren}
         onDragStart={handleDragStart}
       >
@@ -144,7 +196,10 @@ function EquipmentTreeNode({ item, level, expandedIds, onToggle }) {
               item={child}
               level={level + 1}
               expandedIds={expandedIds}
+              selectedItemId={selectedItemId}
               onToggle={onToggle}
+              onSelect={onSelect}
+              onItemContextMenu={onItemContextMenu}
             />
           ))}
         </div>
@@ -153,10 +208,14 @@ function EquipmentTreeNode({ item, level, expandedIds, onToggle }) {
   )
 }
 
-function EquipmentLibraryOverlay({ onClose }) {
+function EquipmentLibraryOverlay({ onClose, onStartMultiAddPlacement }) {
   const [activeTab, setActiveTab] = useState('Ambiente')
   const [query, setQuery] = useState('')
+  const [selectedItemId, setSelectedItemId] = useState(null)
+  const [contextMenu, setContextMenu] = useState(null)
+  const [multiAddItem, setMultiAddItem] = useState(null)
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
+  const treeViewRef = useRef(null)
   const [expandedByTab, setExpandedByTab] = useState(() => ({
     Ambiente: new Set(collectIds(equipmentLibraryTabs.Ambiente)),
     Scenario: new Set(collectIds(equipmentLibraryTabs.Scenario)),
@@ -194,7 +253,38 @@ function EquipmentLibraryOverlay({ onClose }) {
     }))
   }
 
+  const handleItemContextMenu = (event, item) => {
+    setSelectedItemId(item.id)
+
+    if (!shouldOpenMultiAddMenu(item)) {
+      setContextMenu(null)
+      return
+    }
+
+    const container = treeViewRef.current
+    if (!container) {
+      return
+    }
+
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 190
+    const menuHeight = 36
+    const rawX = event.clientX - bounds.left + container.scrollLeft
+    const rawY = event.clientY - bounds.top + container.scrollTop
+    const maxX = container.scrollLeft + container.clientWidth - menuWidth - 4
+    const maxY = container.scrollTop + container.clientHeight - menuHeight - 4
+    const x = Math.min(rawX, maxX)
+    const y = Math.min(rawY, maxY)
+
+    setContextMenu({
+      x: Math.max(container.scrollLeft + 4, x),
+      y: Math.max(container.scrollTop + 4, y),
+      itemId: item.id,
+    })
+  }
+
   return (
+    <>
     <section
       className="cad-equipment-overlay"
       role="dialog"
@@ -202,6 +292,7 @@ function EquipmentLibraryOverlay({ onClose }) {
       aria-label="Biblioteca de equipamentos"
       ref={panelRef}
       style={panelStyle}
+      onPointerDown={() => setContextMenu(null)}
     >
       <header className="cad-equipment-overlay__header" onPointerDown={onHandlePointerDown}>
         <h3 className="cad-equipment-overlay__title">Equipamentos</h3>
@@ -247,18 +338,66 @@ function EquipmentLibraryOverlay({ onClose }) {
         </button>
       </div>
 
-      <div className="cad-equipment-overlay__tree">
+      <div className="cad-equipment-overlay__tree" ref={treeViewRef}>
         {tree.map((item) => (
           <EquipmentTreeNode
             key={item.id}
             item={item}
             level={0}
             expandedIds={expandedByTab[activeTab]}
+            selectedItemId={selectedItemId}
             onToggle={toggleNode}
+            onSelect={(selectedItem) => {
+              setSelectedItemId(selectedItem.id)
+              setContextMenu(null)
+            }}
+            onItemContextMenu={handleItemContextMenu}
           />
         ))}
+
+        {contextMenu ? (
+          <div
+            className="cad-tree-context-menu"
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="cad-tree-context-menu__item"
+              onClick={() => {
+                const item = contextMenu.itemId
+                  ? findItemById(equipmentLibraryTabs[activeTab] ?? [], contextMenu.itemId)
+                  : null
+                setMultiAddItem(item)
+                setContextMenu(null)
+              }}
+            >
+              <span className="cad-tree-context-menu__label">{MULTI_ADD_CONTEXT_LABEL}</span>
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
+
+    {multiAddItem ? (
+      <AddMultipleItemsOverlay
+        itemLabel={multiAddItem.label}
+        onConfirm={({ quantity }) => {
+          onStartMultiAddPlacement?.({
+            quantity,
+            equipment: {
+              id: multiAddItem.id,
+              label: multiAddItem.label,
+              iconKey: multiAddItem.icon,
+              iconSrc: ICON_MAP[multiAddItem.icon] ?? pasta,
+            },
+          })
+          setMultiAddItem(null)
+        }}
+        onClose={() => setMultiAddItem(null)}
+      />
+    ) : null}
+  </>
   )
 }
 

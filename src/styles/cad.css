@@ -37,10 +37,13 @@ button {
 }
 
 #root {
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 .cad-app-shell {
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -146,6 +149,9 @@ button {
 }
 
 .cad-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
   background: #f0f0f0;
   overflow: hidden;
@@ -242,8 +248,11 @@ body.is-dragging-overlay * {
 }
 
 .cad-panel--tree {
+  flex: 1 1 auto;
+  min-height: 0;
   background: #f9f9f9;
   border: 0;
+  overflow: hidden;
 }
 
 .cad-tree-controls {
@@ -332,8 +341,12 @@ body.is-dragging-overlay * {
 
 .cad-tree-view {
   padding: 0 0 10px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   flex: 1;
+  min-height: 0;
+  max-height: 100%;
   background: #ffffff;
   border: 2px solid #c8c8c8;
   border-top-width: 2px;
@@ -403,7 +416,8 @@ body.is-dragging-overlay * {
 }
 
 .cad-tree-context-menu__item:hover {
-  background: #f0f4fa;
+  background: #039ed3;
+  color: #ffffff;
 }
 
 .cad-tree-context-menu__item--danger {
@@ -784,6 +798,26 @@ body.is-dragging-overlay * {
   cursor: crosshair;
 }
 
+.cad-canvas-shell.is-multi-add,
+.cad-canvas-shell.is-multi-add .konvajs-content {
+  cursor: default;
+}
+
+.cad-multi-add-cursor {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 14;
+}
+
+.cad-multi-add-cursor__icon {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .cad-canvas-surface {
   position: absolute;
   inset: 0;
@@ -936,6 +970,7 @@ body.is-dragging-overlay * {
   flex: 1;
   overflow: auto;
   padding: 0;
+  position: relative;
 }
 
 .cad-equip-tree-node {
@@ -960,6 +995,11 @@ body.is-dragging-overlay * {
 
 .cad-equip-tree-row:hover {
   background: #f1f1f1;
+}
+
+.cad-equip-tree-row.is-selected {
+  background: #f5d59d;
+  box-shadow: inset 0 0 0 2px #f8e1b9;
 }
 
 .cad-equip-tree-row.is-draggable {
@@ -1089,6 +1129,127 @@ body.is-dragging-overlay * {
   pointer-events: auto;
 }
 
+/* ── Add Multiple Items Overlay ───────────────────────────── */
+
+.cad-multi-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.cad-multi-overlay {
+  width: 300px;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 4px 4px 3px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.cad-multi-overlay__header {
+  height: 28px;
+  padding: 0 0 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f3f3f3;
+  border-bottom: 1px solid #d0d0d0;
+  font-size: 12px;
+  color: #1f1f1f;
+  cursor: grab;
+  user-select: none;
+}
+
+.cad-multi-overlay__close {
+  width: 32px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #555;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cad-multi-overlay__close:hover {
+  background: #e0e0e0;
+}
+
+.cad-multi-overlay__title-bar {
+  height: 40px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  background: #1d242c;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cad-multi-overlay__body {
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.cad-multi-overlay__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.cad-multi-overlay__label {
+  font-size: 12px;
+  color: #1f1f1f;
+  white-space: nowrap;
+}
+
+.cad-multi-overlay__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 24px;
+  border: 1px solid #bababa;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
+  padding: 0 6px;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #202020;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.cad-multi-overlay__input::-webkit-outer-spin-button,
+.cad-multi-overlay__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.cad-multi-overlay__input:focus {
+  outline: none;
+  border-color: #9a9a9a;
+}
+
+.cad-multi-overlay__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+
+
 .cad-environment-overlay-backdrop {
   position: absolute;
   inset: 0;
@@ -1105,6 +1266,10 @@ body.is-dragging-overlay * {
   box-shadow: 0 4px 4px 3px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   pointer-events: auto;
+}
+
+.cad-scale-overlay--value {
+  width: 300px;
 }
 
 .cad-scale-overlay__header {
@@ -1133,11 +1298,19 @@ body.is-dragging-overlay * {
 .cad-scale-overlay__content--value {
   width: 100%;
   min-height: 164px;
-  justify-content: center;
+  justify-content: flex-start;
+}
+
+.cad-scale-overlay__field-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 20px;
 }
 
 .cad-scale-overlay__text {
   margin: 0;
+  flex: 1 1 0;
   font-size: 12px;
   line-height: 1.35;
   color: #000000;
@@ -1148,7 +1321,7 @@ body.is-dragging-overlay * {
 }
 
 .cad-scale-overlay__input {
-  width: 100%;
+  flex: 1 1 0;
   height: 27px;
   border: 1px solid #bababa;
   border-radius: 2px;
@@ -1165,6 +1338,17 @@ body.is-dragging-overlay * {
   border-color: #9a9a9a;
 }
 
+.cad-scale-overlay__input--no-stepper {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.cad-scale-overlay__input--no-stepper::-webkit-outer-spin-button,
+.cad-scale-overlay__input--no-stepper::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .cad-scale-overlay__start-btn {
   min-width: 57px;
   height: 25px;
@@ -1175,6 +1359,7 @@ body.is-dragging-overlay * {
   color: #323232;
   font-size: 12px;
   cursor: pointer;
+  align-self: center;
 }
 
 .cad-scale-overlay__start-btn:hover {
@@ -1453,4 +1638,110 @@ body.is-dragging-overlay * {
   .cad-statusbar__item--right {
     margin-left: 0;
   }
+}
+
+/* ── Delete Environment Confirm Overlay ───────────────────── */
+
+.cad-delete-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.cad-delete-confirm-overlay {
+  width: 362px;
+  border: 1px solid #b3b3b3;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 4px 4px 3px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.cad-delete-confirm-overlay__header {
+  height: 31px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f3f3f3;
+  font-size: 12px;
+  color: #000000;
+  cursor: grab;
+  user-select: none;
+}
+
+.cad-delete-confirm-overlay__close {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #555;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cad-delete-confirm-overlay__close:hover {
+  background: #e0e0e0;
+}
+
+.cad-delete-confirm-overlay__content {
+  padding: 13px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8f8f8;
+}
+
+.cad-delete-confirm-overlay__text {
+  margin: 0;
+  font-size: 14px;
+  color: #000000;
+  flex: 1 1 auto;
+}
+
+.cad-delete-confirm-overlay__icon {
+  width: 44px;
+  height: 41px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.cad-delete-confirm-overlay__footer {
+  padding: 44px 12px 11px;
+  background: #f4f4f4;
+  border-top: 1px solid #c8c8c8;
+}
+
+.cad-delete-confirm-overlay__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 11px;
+}
+
+.cad-delete-confirm-overlay__btn {
+  width: 74px;
+  height: 25px;
+  padding: 0 12px;
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #eeeeee 0%, #d9d9d9 100%);
+  font-size: 12px;
+  color: #323232;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cad-delete-confirm-overlay__btn:hover {
+  background: linear-gradient(180deg, #e0e0e0 0%, #cccccc 100%);
 }

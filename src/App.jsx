@@ -7,6 +7,7 @@ import EquipmentLibraryOverlay from './components/EquipmentLibraryOverlay.jsx'
 import StatusBar from './components/StatusBar.jsx'
 import ScaleSetupOverlay from './components/ScaleSetupOverlay.jsx'
 import ScaleValueOverlay from './components/ScaleValueOverlay.jsx'
+import DeleteEnvironmentConfirmOverlay from './components/DeleteEnvironmentConfirmOverlay.jsx'
 import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
@@ -131,6 +132,7 @@ function App() {
   const [showScaleOverlay, setShowScaleOverlay] = useState(false)
   const [showScaleValueOverlay, setShowScaleValueOverlay] = useState(false)
   const [showEquipmentLibrary, setShowEquipmentLibrary] = useState(false)
+  const [multiAddPlacementRequest, setMultiAddPlacementRequest] = useState(null)
   const [isAwaitingScaleLine, setIsAwaitingScaleLine] = useState(false)
   const [pendingScaleSegment, setPendingScaleSegment] = useState(null)
   const [scaleDefinition, setScaleDefinition] = useState(null)
@@ -151,6 +153,7 @@ function App() {
   const [renamingEquipmentId, setRenamingEquipmentId] = useState(null)
   const [renamingEquipmentSource, setRenamingEquipmentSource] = useState(null)
   const [polygonDeleteRequestId, setPolygonDeleteRequestId] = useState(null)
+  const [pendingDeletePolygonId, setPendingDeletePolygonId] = useState(null)
   const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
   const dragStateRef = useRef({ dragging: false })
   const importedImageUrlRef = useRef(null)
@@ -236,6 +239,7 @@ function App() {
     setRenamingEquipmentId(null)
     setRenamingEquipmentSource(null)
     setShowEquipmentLibrary(false)
+    setMultiAddPlacementRequest(null)
   }
 
   const toggleProjectPanel = () => {
@@ -266,7 +270,7 @@ function App() {
     setIsAwaitingScaleLine(false)
   }
 
-  const handleConcludeScale = (metersValue) => {
+  const handleConcludeScale = ({ metersValue, ceilingHeight }) => {
     if (!pendingScaleSegment?.lengthPixels) {
       return
     }
@@ -283,6 +287,9 @@ function App() {
     })
     setShowScaleValueOverlay(false)
     setPendingScaleSegment(null)
+    if (ceilingHeight) {
+      setDefaultCeilingHeight(ceilingHeight)
+    }
     setActiveTool('select')
     setClearScaleReferenceToken((currentToken) => currentToken + 1)
   }
@@ -346,6 +353,58 @@ function App() {
         source: 'equipment-item',
       }),
     )
+  }
+
+  const handleStartMultiAddPlacement = ({ quantity, equipment }) => {
+    const parsedQuantity = Number.parseInt(quantity, 10)
+
+    if (!equipment?.label || !equipment?.iconSrc || Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      return
+    }
+
+    setActiveTool('select')
+    setMultiAddPlacementRequest({
+      token: Date.now(),
+      quantity: parsedQuantity,
+      equipment,
+    })
+  }
+
+  const handleMultiAddPlacementCommit = ({ polygonId, points, equipment }) => {
+    const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
+
+    if (!environment || !Array.isArray(points) || points.length === 0 || !equipment?.label || !equipment?.iconSrc) {
+      setMultiAddPlacementRequest(null)
+      return
+    }
+
+    const equipmentsToInsert = points.map((point, index) => ({
+      id: `equip-${Date.now()}-${index}-${Math.round(Math.random() * 1000)}`,
+      polygonId,
+      point,
+      label: equipment.label,
+      iconSrc: equipment.iconSrc,
+      iconKey: equipment.iconKey,
+      environmentId: environment.id,
+    }))
+
+    setPlacedEquipments((currentEquipments) => [...currentEquipments, ...equipmentsToInsert])
+
+    setProjectTree((currentTree) =>
+      equipmentsToInsert.reduce(
+        (tree, currentEquipment) =>
+          appendEquipmentToEnvironment(tree, environment.id, {
+            id: currentEquipment.id,
+            label: currentEquipment.label,
+            icon: currentEquipment.iconKey ?? 'drivers',
+            iconSrc: currentEquipment.iconSrc,
+            source: 'equipment-item',
+          }),
+        currentTree,
+      ),
+    )
+
+    setMultiAddPlacementRequest(null)
   }
 
   const handleEquipmentMoved = ({ equipmentId, polygonId, point }) => {
@@ -440,8 +499,18 @@ function App() {
       return
     }
 
-    setPolygonDeleteRequestId(environment.polygonId)
-    handlePolygonDeleted(environment.polygonId)
+    setPendingDeletePolygonId(environment.polygonId)
+  }
+
+  const handleConfirmDeletePolygon = () => {
+    if (!pendingDeletePolygonId) return
+    setPolygonDeleteRequestId(pendingDeletePolygonId)
+    handlePolygonDeleted(pendingDeletePolygonId)
+    setPendingDeletePolygonId(null)
+  }
+
+  const handleCancelDeletePolygon = () => {
+    setPendingDeletePolygonId(null)
   }
 
   const handleEditEnvironmentRequest = (environmentId) => {
@@ -776,6 +845,9 @@ function App() {
                 clearScaleReferenceToken={clearScaleReferenceToken}
                 onEquipmentDrop={handleEquipmentDropped}
                 onEquipmentMove={handleEquipmentMoved}
+                multiAddPlacementRequest={multiAddPlacementRequest}
+                onMultiAddPlacementCommit={handleMultiAddPlacementCommit}
+                onMultiAddPlacementCancel={() => setMultiAddPlacementRequest(null)}
                 onPolygonTranslated={handlePolygonTranslated}
                 onEquipmentDelete={handleDeleteEquipment}
                 selectedEquipmentId={selectedEquipmentId}
@@ -808,11 +880,7 @@ function App() {
                   }
                 }}
                 onPolygonDeleteRequest={(polygonId) => {
-                  const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
-                  if (environment) {
-                    setPolygonDeleteRequestId(environment.polygonId)
-                    handlePolygonDeleted(environment.polygonId)
-                  }
+                  setPendingDeletePolygonId(polygonId)
                 }}
                 onCanvasBackgroundClick={() => {
                   setSelectedEnvironmentId(null)
@@ -836,7 +904,12 @@ function App() {
                 onCancelRename={handleCancelRename}
               />
               {showScaleOverlay ? <ScaleSetupOverlay onStart={handleStartScaleSetup} /> : null}
-              {showScaleValueOverlay ? <ScaleValueOverlay onConclude={handleConcludeScale} /> : null}
+              {showScaleValueOverlay ? (
+                <ScaleValueOverlay
+                  defaultCeilingHeight={defaultCeilingHeight}
+                  onConclude={handleConcludeScale}
+                />
+              ) : null}
               {showEnvironmentOverlay ? (
                 <EnvironmentInfoOverlay
                   suggestedName={editingEnvironment?.name ?? nextEnvironmentName}
@@ -847,7 +920,16 @@ function App() {
                 />
               ) : null}
               {showEquipmentLibrary ? (
-                <EquipmentLibraryOverlay onClose={() => setShowEquipmentLibrary(false)} />
+                <EquipmentLibraryOverlay
+                  onClose={() => setShowEquipmentLibrary(false)}
+                  onStartMultiAddPlacement={handleStartMultiAddPlacement}
+                />
+              ) : null}
+              {pendingDeletePolygonId ? (
+                <DeleteEnvironmentConfirmOverlay
+                  onConfirm={handleConfirmDeletePolygon}
+                  onCancel={handleCancelDeletePolygon}
+                />
               ) : null}
             </div>
           </section>
