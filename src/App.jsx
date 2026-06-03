@@ -9,8 +9,10 @@ import ScaleSetupOverlay from './components/ScaleSetupOverlay.jsx'
 import ScaleValueOverlay from './components/ScaleValueOverlay.jsx'
 import DeleteEnvironmentConfirmOverlay from './components/DeleteEnvironmentConfirmOverlay.jsx'
 import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
+import EquipmentPropertiesOverlay from './components/EquipmentPropertiesOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
+import { createDefaultEquipmentFilters } from './data/equipmentLibrary.js'
 import { initialProject } from './data/initialProject.js'
 import './styles/cad.css'
 
@@ -32,17 +34,17 @@ const ENVIRONMENT_CLASS_OPTIONS = [
   'Apoio',
 ]
 const ENVIRONMENT_CLASS_COLOR_MAP = {
-  'Não definida': '#B3B3B3',
+  'Não definida': '#6BC2F7',
   'Dormitório': '#6BC2F7',
-  Banheiro: '#00EDFF',
-  Social: '#317C6A',
-  'Serviço': '#FFD65B',
-  'Circulação': '#DDA72F',
-  Lazer: '#FC4242',
-  Externo: '#3BE296',
-  Trabalho: '#D380FF',
-  Garagem: '#FF8740',
-  Apoio: '#FC8DCA',
+  'Banheiro': '#6BC2F7',
+  'Social': '#6BC2F7',
+  'Serviço': '#6BC2F7',
+  'Circulação': '#6BC2F7',
+  'Lazer': '#6BC2F7',
+  'Externo': '#6BC2F7',
+  'Trabalho': '#6BC2F7',
+  'Garagem': '#6BC2F7',
+  'Apoio': '#FC8DCA',
 }
 
 function clampZoom(value) {
@@ -89,37 +91,102 @@ function appendEquipmentToEnvironment(node, environmentId, child) {
   }
 }
 
-function appendEnvironmentAfterAutomationRoom(root, child) {
+function appendEnvironmentToFirstPavimento(root, child) {
   if (root.id !== PROJECT_ROOT_ID) {
     return root
   }
 
   const currentChildren = root.children ?? []
-  const automationRoomIndex = currentChildren.findIndex((node) => node.id === AUTOMATION_ROOM_ID)
+  const firstPavimentoIndex = currentChildren.findIndex((node) => node.source === 'pavimento')
 
-  if (automationRoomIndex === -1) {
-    return {
-      ...root,
-      children: [...currentChildren, child],
-    }
+  if (firstPavimentoIndex === -1) {
+    return { ...root, children: [...currentChildren, child] }
   }
 
-  let insertIndex = automationRoomIndex + 1
-  while (
-    insertIndex < currentChildren.length
-    && currentChildren[insertIndex]?.source === 'created-environment'
-  ) {
-    insertIndex += 1
+  const pavimento = currentChildren[firstPavimentoIndex]
+  const updatedPavimento = {
+    ...pavimento,
+    children: [...(pavimento.children ?? []), child],
+  }
+
+  return {
+    ...root,
+    children: [
+      ...currentChildren.slice(0, firstPavimentoIndex),
+      updatedPavimento,
+      ...currentChildren.slice(firstPavimentoIndex + 1),
+    ],
+  }
+}
+
+function collectEnvTreeNodes(node, result = []) {
+  if (node.icon === 'ambientes') {
+    result.push({ id: node.id, label: node.label })
+  }
+  node.children?.forEach((child) => collectEnvTreeNodes(child, result))
+  return result
+}
+
+function appendPavimentoToProject(root) {
+  const newPavimento = {
+    id: `pavimento-${Date.now()}`,
+    label: 'Novo Pavimento',
+    icon: 'pavimento',
+    source: 'pavimento',
+    children: [],
+  }
+
+  const currentChildren = root.children ?? []
+
+  let insertIndex = currentChildren.length
+  for (let i = currentChildren.length - 1; i >= 0; i--) {
+    if (currentChildren[i].source === 'pavimento' || currentChildren[i].id === 'atividades-globais') {
+      insertIndex = i + 1
+      break
+    }
   }
 
   return {
     ...root,
     children: [
       ...currentChildren.slice(0, insertIndex),
-      child,
+      newPavimento,
       ...currentChildren.slice(insertIndex),
     ],
   }
+}
+
+function findFirstPavimentoId(node) {
+  if (!node) {
+    return null
+  }
+
+  if (node.source === 'pavimento') {
+    return node.id
+  }
+
+  for (const child of node.children ?? []) {
+    const found = findFirstPavimentoId(child)
+    if (found) {
+      return found
+    }
+  }
+
+  return null
+}
+
+function isEquipmentVisibleByFilters(equipment, filters) {
+  if (!filters.all) {
+    return false
+  }
+
+  const filterKeys = equipment?.filterKeys ?? []
+
+  if (filterKeys.length === 0) {
+    return true
+  }
+
+  return filterKeys.some((filterKey) => filters[filterKey])
 }
 
 function App() {
@@ -148,15 +215,21 @@ function App() {
   const [defaultCeilingHeight, setDefaultCeilingHeight] = useState('3')
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState(null)
   const [selectedEquipmentId, setSelectedEquipmentId] = useState(null)
+  const [equipmentFilters, setEquipmentFilters] = useState(() => createDefaultEquipmentFilters())
+  const [equipmentPropertiesId, setEquipmentPropertiesId] = useState(null)
   const [renamingEnvironmentId, setRenamingEnvironmentId] = useState(null)
   const [renamingSource, setRenamingSource] = useState(null)
   const [renamingEquipmentId, setRenamingEquipmentId] = useState(null)
   const [renamingEquipmentSource, setRenamingEquipmentSource] = useState(null)
+  const [renamingGenericNodeId, setRenamingGenericNodeId] = useState(null)
   const [polygonDeleteRequestId, setPolygonDeleteRequestId] = useState(null)
   const [pendingDeletePolygonId, setPendingDeletePolygonId] = useState(null)
   const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
+  const [pendingImportPavimentoId, setPendingImportPavimentoId] = useState(null)
+  const [importedPlanPavimentoId, setImportedPlanPavimentoId] = useState(null)
   const dragStateRef = useRef({ dragging: false })
   const importedImageUrlRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   const menuItems = useMemo(
     () => [
@@ -209,7 +282,7 @@ function App() {
     document.body.classList.add('is-resizing-tree')
   }
 
-  const handleImportImage = (file) => {
+  const handleImportImage = (file, targetPavimentoId = null) => {
     if (importedImageUrlRef.current) {
       URL.revokeObjectURL(importedImageUrlRef.current)
     }
@@ -240,6 +313,10 @@ function App() {
     setRenamingEquipmentSource(null)
     setShowEquipmentLibrary(false)
     setMultiAddPlacementRequest(null)
+
+    const fallbackPavimentoId = findFirstPavimentoId(initialProject)
+    setImportedPlanPavimentoId(targetPavimentoId ?? fallbackPavimentoId)
+    setPendingImportPavimentoId(null)
   }
 
   const toggleProjectPanel = () => {
@@ -254,10 +331,30 @@ function App() {
     setImageRotation((currentRotation) => (currentRotation + 90) % 360)
   }
 
+  const handleToggleEquipmentFilter = (filterKey) => {
+    setEquipmentFilters((currentFilters) => ({
+      ...currentFilters,
+      [filterKey]: !currentFilters[filterKey],
+    }))
+  }
+
   const handleStartScaleSetup = () => {
     setShowScaleOverlay(false)
     setActiveTool('polygon')
     setIsAwaitingScaleLine(true)
+  }
+
+  const handleOpenScaleProperties = () => {
+    if (!importedImage) {
+      return
+    }
+
+    setShowScaleOverlay(true)
+    setShowScaleValueOverlay(false)
+    setIsAwaitingScaleLine(false)
+    setPendingScaleSegment(null)
+    setActiveTool('select')
+    setClearScaleReferenceToken((currentToken) => currentToken + 1)
   }
 
   const handlePolygonSegmentCreated = (segment) => {
@@ -290,6 +387,13 @@ function App() {
     if (ceilingHeight) {
       setDefaultCeilingHeight(ceilingHeight)
     }
+    setActiveTool('select')
+    setClearScaleReferenceToken((currentToken) => currentToken + 1)
+  }
+
+  const handleCancelScaleValueOverlay = () => {
+    setShowScaleValueOverlay(false)
+    setPendingScaleSegment(null)
     setActiveTool('select')
     setClearScaleReferenceToken((currentToken) => currentToken + 1)
   }
@@ -340,6 +444,8 @@ function App() {
       label: equipment.label,
       iconSrc: equipment.iconSrc,
       iconKey: equipment.iconKey,
+      catalogItemId: equipment.catalogItemId ?? equipment.id,
+      filterKeys: equipment.filterKeys ?? [],
       environmentId: environment.id,
     }
 
@@ -385,6 +491,8 @@ function App() {
       label: equipment.label,
       iconSrc: equipment.iconSrc,
       iconKey: equipment.iconKey,
+      catalogItemId: equipment.catalogItemId ?? equipment.id,
+      filterKeys: equipment.filterKeys ?? [],
       environmentId: environment.id,
     }))
 
@@ -486,9 +594,30 @@ function App() {
       currentRenamingId === equipmentId ? null : currentRenamingId,
     )
     setRenamingEquipmentSource(null)
+    setEquipmentPropertiesId((currentEquipmentId) =>
+      currentEquipmentId === equipmentId ? null : currentEquipmentId,
+    )
+  }
+
+  const handleOpenEquipmentProperties = (equipmentId) => {
+    const equipment = placedEquipments.find((currentEquipment) => currentEquipment.id === equipmentId)
+    if (!equipment) {
+      return
+    }
+
+    setSelectedEquipmentId(equipmentId)
+    if (equipment.environmentId) {
+      setSelectedEnvironmentId(equipment.environmentId)
+    }
+    setEquipmentPropertiesId(equipmentId)
   }
 
   const handleDeleteNodeFromTree = (node) => {
+    if (node?.source === 'equipment-item') {
+      handleDeleteEquipment(node.id)
+      return
+    }
+
     if (node?.source !== 'created-environment') {
       return
     }
@@ -610,6 +739,7 @@ function App() {
     setRenamingSource(null)
     setRenamingEquipmentId(null)
     setRenamingEquipmentSource(null)
+    setRenamingGenericNodeId(null)
   }
 
   const handleSelectTreeNode = (node) => {
@@ -631,6 +761,11 @@ function App() {
 
     if (node?.source === 'equipment-item') {
       handleStartEquipmentRename(node.id, 'tree')
+      return
+    }
+
+    if (node?.source === 'project' || node?.source === 'pavimento') {
+      setRenamingGenericNodeId(node.id)
     }
   }
 
@@ -642,10 +777,17 @@ function App() {
 
     if (placedEquipments.some((equipment) => equipment.id === nodeId)) {
       handleCommitEquipmentRename(nodeId, newName)
+      return
     }
+
+    const trimmed = (newName ?? '').trim()
+    if (trimmed) {
+      setProjectTree((curr) => updateNodeLabel(curr, nodeId, trimmed))
+    }
+    setRenamingGenericNodeId(null)
   }
 
-  const handleConcludeEnvironment = ({ name, environmentClass, ceilingHeight }) => {
+  const handleConcludeEnvironment = ({ name, environmentClass, ceilingHeight, associateEnvId, associateEnvName }) => {
     if (editingEnvironmentId) {
       const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
 
@@ -682,6 +824,32 @@ function App() {
       return
     }
 
+    // Associate an existing (unassociated) environment to the new polygon
+    if (associateEnvId) {
+      const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
+
+      setEnvironments((currentEnvironments) => [
+        ...currentEnvironments,
+        {
+          id: associateEnvId,
+          polygonId: pendingEnvironmentPolygon.id,
+          name: associateEnvName,
+          environmentClass,
+          ceilingHeight,
+          color,
+        },
+      ])
+      setDefaultCeilingHeight(ceilingHeight)
+      setPolygonColorById((currentColors) => ({
+        ...currentColors,
+        [pendingEnvironmentPolygon.id]: color,
+      }))
+      setPendingEnvironmentPolygon(null)
+      setEditingEnvironmentId(null)
+      setShowEnvironmentOverlay(false)
+      return
+    }
+
     const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
 
     const nextEnvironment = {
@@ -700,7 +868,7 @@ function App() {
       [pendingEnvironmentPolygon.id]: color,
     }))
     setProjectTree((currentTree) =>
-      appendEnvironmentAfterAutomationRoom(currentTree, {
+      appendEnvironmentToFirstPavimento(currentTree, {
         id: nextEnvironment.id,
         label: name,
         icon: 'ambientes',
@@ -712,12 +880,41 @@ function App() {
     setShowEnvironmentOverlay(false)
   }
 
+  const handleAddPavimento = () => {
+    setProjectTree((curr) => appendPavimentoToProject(curr))
+  }
+
+  const handleAddEnvironmentFromMenu = () => {
+    setActiveTool('polygon')
+  }
+
+  const handleImportFileRequest = (node) => {
+    setPendingImportPavimentoId(node?.source === 'pavimento' ? node.id : null)
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (file.type !== 'image/png') {
+      event.target.value = ''
+      return
+    }
+    handleImportImage(file, pendingImportPavimentoId)
+    event.target.value = ''
+  }
+
   const scaleStatusLabel = scaleDefinition
     ? `Escala definida: ${scaleDefinition.meters.toFixed(2)} m em ${scaleDefinition.pixels.toFixed(1)} px`
     : 'Escala nao definida'
 
   const nextEnvironmentName = `Ambiente ${environments.length + 1}`
   const editingEnvironment = environments.find((environment) => environment.id === editingEnvironmentId) ?? null
+
+  const unassociatedEnvironments = useMemo(() => {
+    const envIds = new Set(environments.map((e) => e.id))
+    return collectEnvTreeNodes(projectTree).filter((node) => !envIds.has(node.id))
+  }, [environments, projectTree])
   const polygonLabelById = environments.reduce((accumulator, environment) => {
     accumulator[environment.polygonId] = environment.name
     return accumulator
@@ -735,11 +932,40 @@ function App() {
     ? (renamingEnvironment?.polygonId ?? null)
     : null
   const renamingEquipmentNodeId = renamingEquipmentSource === 'tree' ? renamingEquipmentId : null
-  const renamingNodeId = renamingSource === 'tree' ? renamingEnvironmentId : renamingEquipmentNodeId
+  const renamingNodeId = renamingGenericNodeId ?? (renamingSource === 'tree' ? renamingEnvironmentId : renamingEquipmentNodeId)
   const renamingEquipmentCanvasId = renamingEquipmentSource === 'canvas' ? renamingEquipmentId : null
   const selectedEnvironment = environments.find((environment) => environment.id === selectedEnvironmentId)
   const selectedPolygonId = selectedEnvironment?.polygonId ?? null
   const selectedNodeId = selectedEquipmentId ?? selectedEnvironmentId
+  const equipmentPropertiesEquipment = placedEquipments.find((equipment) => equipment.id === equipmentPropertiesId) ?? null
+  const equipmentPropertiesEnvironment = environments.find(
+    (environment) => environment.id === equipmentPropertiesEquipment?.environmentId,
+  )
+
+  useEffect(() => {
+    if (!selectedEquipmentId) {
+      return
+    }
+
+    const selectedEquipment = placedEquipments.find((equipment) => equipment.id === selectedEquipmentId)
+
+    if (!selectedEquipment || isEquipmentVisibleByFilters(selectedEquipment, equipmentFilters)) {
+      return
+    }
+
+    setSelectedEquipmentId(null)
+    setRenamingEquipmentId(null)
+    setRenamingEquipmentSource(null)
+  }, [equipmentFilters, placedEquipments, selectedEquipmentId])
+
+  useEffect(() => {
+    if (equipmentFilters.text || !renamingEquipmentId) {
+      return
+    }
+
+    setRenamingEquipmentId(null)
+    setRenamingEquipmentSource(null)
+  }, [equipmentFilters.text, renamingEquipmentId])
 
   useEffect(
     () => () => {
@@ -752,6 +978,13 @@ function App() {
 
   return (
     <div className="cad-app-shell">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png"
+        className="cad-toolbar-file-input"
+        onChange={handleFileChange}
+      />
       <AppMenu
         title="E2 - TELA - ESTRUTURA - PLANTA BAIXA"
         items={menuItems}
@@ -776,6 +1009,7 @@ function App() {
           {isProjectPanelOpen ? (
             <ProjectTree
               project={projectTree}
+              importedPlanPavimentoId={importedImage ? importedPlanPavimentoId : null}
               selectedNodeId={selectedNodeId}
               renamingNodeId={renamingNodeId}
               onSelectNode={handleSelectTreeNode}
@@ -785,6 +1019,10 @@ function App() {
               onDeleteNode={handleDeleteNodeFromTree}
               onEditNode={handleEditNodeRequest}
               onFocusNode={handleFocusNodeFromTree}
+              onAddPavimento={handleAddPavimento}
+              onAddEnvironment={handleAddEnvironmentFromMenu}
+              onImportFileRequest={handleImportFileRequest}
+              onDefineScale={handleOpenScaleProperties}
             />
           ) : null}
         </aside>
@@ -820,9 +1058,10 @@ function App() {
               onToolChange={setActiveTool}
               zoom={zoom}
               onZoomChange={handleZoomChange}
-              onImportImage={handleImportImage}
               onToggleEquipmentLibrary={() => setShowEquipmentLibrary((current) => !current)}
               onRotateImage={handleRotateImage}
+              equipmentFilters={equipmentFilters}
+              onToggleEquipmentFilter={handleToggleEquipmentFilter}
             />
             <div className="cad-canvas-area">
               <CadCanvas
@@ -832,6 +1071,7 @@ function App() {
                 backgroundImage={importedImage}
                 onZoomChange={handleZoomChange}
                 hasScaleDefinition={Boolean(scaleDefinition)}
+                scaleDefinition={scaleDefinition}
                 onPolygonSegmentCreated={handlePolygonSegmentCreated}
                 onPolygonCreated={handlePolygonCreated}
                 onPolygonDeleted={handlePolygonDeleted}
@@ -841,6 +1081,7 @@ function App() {
                 polygonLabelById={polygonLabelById}
                 polygonCeilingHeightById={polygonCeilingHeightById}
                 placedEquipments={placedEquipments}
+                equipmentFilters={equipmentFilters}
                 isAwaitingScaleLine={isAwaitingScaleLine}
                 clearScaleReferenceToken={clearScaleReferenceToken}
                 onEquipmentDrop={handleEquipmentDropped}
@@ -900,14 +1141,18 @@ function App() {
                   else handleCancelRename()
                 }}
                 onEquipmentLabelDoubleClick={(equipmentId) => handleStartEquipmentRename(equipmentId, 'canvas')}
+                onEquipmentRenameRequest={(equipmentId) => handleStartEquipmentRename(equipmentId, 'canvas')}
+                onEquipmentPropertiesRequest={handleOpenEquipmentProperties}
                 onEquipmentLabelRenameCommit={handleCommitEquipmentRename}
                 onCancelRename={handleCancelRename}
               />
               {showScaleOverlay ? <ScaleSetupOverlay onStart={handleStartScaleSetup} /> : null}
               {showScaleValueOverlay ? (
                 <ScaleValueOverlay
+                  defaultMetersValue={scaleDefinition?.meters}
                   defaultCeilingHeight={defaultCeilingHeight}
                   onConclude={handleConcludeScale}
+                  onCancel={handleCancelScaleValueOverlay}
                 />
               ) : null}
               {showEnvironmentOverlay ? (
@@ -917,6 +1162,8 @@ function App() {
                   defaultCeilingHeight={editingEnvironment?.ceilingHeight ?? defaultCeilingHeight}
                   initialClass={editingEnvironment?.environmentClass}
                   onConclude={handleConcludeEnvironment}
+                  unassociatedEnvironments={unassociatedEnvironments}
+                  allowAssociate={editingEnvironmentId == null}
                 />
               ) : null}
               {showEquipmentLibrary ? (
@@ -931,6 +1178,13 @@ function App() {
                   onCancel={handleCancelDeletePolygon}
                 />
               ) : null}
+              {equipmentPropertiesEquipment ? (
+                <EquipmentPropertiesOverlay
+                  equipment={equipmentPropertiesEquipment}
+                  environmentName={equipmentPropertiesEnvironment?.name ?? 'Ambiente'}
+                  onClose={() => setEquipmentPropertiesId(null)}
+                />
+              ) : null}
             </div>
           </section>
         </main>
@@ -940,7 +1194,6 @@ function App() {
         version="2.15.5 Build(6)"
         connectionStatus="Local"
         installationName="Nome do projeto"
-        notificationLabel={scaleStatusLabel}
       />
     </div>
   )

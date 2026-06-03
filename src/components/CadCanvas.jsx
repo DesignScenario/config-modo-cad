@@ -1,9 +1,10 @@
-import { Circle, Group, Layer, Line, Rect, Stage, Image as KonvaImage } from 'react-konva'
+import { Circle, Group, Layer, Line, Rect, Stage, Text, Image as KonvaImage } from 'react-konva'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import apagarProjeto from '../assets/apagar-projeto.svg'
 
-const POLYGON_COLOR = '#FFD65B'
-const SELECTED_POLYGON_COLOR = '#0D99FF'
+const POLYGON_COLOR = '#6BC2F7'
+const RULER_COLOR = '#FC4242'
+const SELECTED_POLYGON_COLOR = '#0095ff'
 const POLYGON_POINT_RADIUS = 6
 const POLYGON_POINT_STROKE = 4
 const POLYGON_LINE_STROKE = 4
@@ -16,7 +17,7 @@ const POLYGON_LABEL_LINE_HEIGHT_RATIO = 1.2
 const EQUIPMENT_HOLD_TO_DRAG_MS = 180
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
-const MULTI_ADD_PREVIEW_COLOR = '#0D99FF'
+const MULTI_ADD_PREVIEW_COLOR = '#0095ff'
 
 function hexToRgba(hexColor, alpha) {
   const sanitized = hexColor.replace('#', '')
@@ -180,8 +181,47 @@ function normToStage(normPoint, fittedImage) {
   return rotatePoint(unrotatedPoint, fittedImage.center, fittedImage.rotation)
 }
 
+function normToImagePixels(normPoint, image) {
+  if (!image) {
+    return normPoint
+  }
+
+  const imageWidth = image.naturalWidth || image.width || 0
+  const imageHeight = image.naturalHeight || image.height || 0
+
+  if (!imageWidth || !imageHeight) {
+    return normPoint
+  }
+
+  return {
+    x: normPoint.x * imageWidth,
+    y: normPoint.y * imageHeight,
+  }
+}
+
+function getImagePixelDistance(startPoint, endPoint, image) {
+  const startPixels = normToImagePixels(startPoint, image)
+  const endPixels = normToImagePixels(endPoint, image)
+
+  return Math.hypot(endPixels.x - startPixels.x, endPixels.y - startPixels.y)
+}
+
 function clampZoom(value) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+}
+
+function isEquipmentIconVisible(equipment, equipmentFilters) {
+  if (!equipmentFilters?.all) {
+    return false
+  }
+
+  const filterKeys = equipment?.filterKeys ?? []
+
+  if (filterKeys.length === 0) {
+    return true
+  }
+
+  return filterKeys.some((filterKey) => equipmentFilters[filterKey])
 }
 
 function distributePointsBetween(startPoint, endPoint, quantity) {
@@ -524,6 +564,7 @@ function CadCanvas({
   backgroundImage,
   onZoomChange,
   hasScaleDefinition,
+  scaleDefinition,
   onPolygonSegmentCreated,
   onPolygonCreated,
   onPolygonDeleted,
@@ -533,6 +574,7 @@ function CadCanvas({
   polygonLabelById,
   polygonCeilingHeightById,
   placedEquipments,
+  equipmentFilters,
   isAwaitingScaleLine,
   clearScaleReferenceToken,
   onEquipmentDrop,
@@ -556,6 +598,8 @@ function CadCanvas({
   onLabelDoubleClick,
   onLabelRenameCommit,
   onEquipmentLabelDoubleClick,
+  onEquipmentRenameRequest,
+  onEquipmentPropertiesRequest,
   onEquipmentLabelRenameCommit,
   onCancelRename,
   onPolygonTranslated,
@@ -577,12 +621,15 @@ function CadCanvas({
   const [scaleDraftStart, setScaleDraftStart] = useState(null)
   const [scaleDraftCursor, setScaleDraftCursor] = useState(null)
   const [scaleReferenceSegment, setScaleReferenceSegment] = useState(null)
+  const [rulerDraftStart, setRulerDraftStart] = useState(null)
+  const [rulerDraftCursor, setRulerDraftCursor] = useState(null)
   const [rectDraftStart, setRectDraftStart] = useState(null)
   const [rectDraftCursor, setRectDraftCursor] = useState(null)
   const [draggingEquipment, setDraggingEquipment] = useState(null)
   const [draggingPolygon, setDraggingPolygon] = useState(null)
   const [multiAddDraft, setMultiAddDraft] = useState(null)
   const [polygonContextMenu, setPolygonContextMenu] = useState(null)
+  const [equipmentContextMenu, setEquipmentContextMenu] = useState(null)
   const [polygonRenameDraft, setPolygonRenameDraft] = useState('')
   const [equipmentRenameDraft, setEquipmentRenameDraft] = useState('')
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
@@ -657,7 +704,11 @@ function CadCanvas({
       setRectDraftStart(null)
       setRectDraftCursor(null)
     }
-  }, [activeTool])
+    if (activeTool !== 'ruler' || !hasScaleDefinition) {
+      setRulerDraftStart(null)
+      setRulerDraftCursor(null)
+    }
+  }, [activeTool, hasScaleDefinition])
 
   useEffect(() => {
     if (activeTool !== 'select') {
@@ -833,11 +884,13 @@ function CadCanvas({
   useEffect(() => {
     const handleCloseContextMenu = () => {
       setPolygonContextMenu(null)
+      setEquipmentContextMenu(null)
     }
 
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
         setPolygonContextMenu(null)
+        setEquipmentContextMenu(null)
       }
     }
 
@@ -853,6 +906,34 @@ function CadCanvas({
       window.removeEventListener('keydown', handleEscape)
     }
   }, [])
+
+  const openEquipmentContextMenu = (event, equipmentId) => {
+    if (activeTool !== 'select') {
+      return
+    }
+
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 172
+    const menuHeight = 92
+    const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
+    const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
+
+    onEquipmentSelect?.(equipmentId)
+    setPolygonContextMenu(null)
+    setEquipmentContextMenu({
+      equipmentId,
+      x: Math.max(4, x),
+      y: Math.max(4, y),
+    })
+  }
 
   useEffect(() => {
     setScaleReferenceSegment(null)
@@ -1138,15 +1219,19 @@ function CadCanvas({
       return
     }
 
+    const stage = stageRef.current
+    const rawPoint = toStagePoint(stage)
+
+    if (!rawPoint) {
+      return
+    }
+
+    const normPoint = stageToNorm(rawPoint, fittedBackgroundImage)
+
     if (activeTool === 'rectangle') {
       if (!hasScaleDefinition) {
         return
       }
-
-      const stage = stageRef.current
-      const rawPoint = toStagePoint(stage)
-      if (!rawPoint) return
-      const normPoint = stageToNorm(rawPoint, fittedBackgroundImage)
 
       if (!rectDraftStart) {
         setRectDraftStart(normPoint)
@@ -1178,19 +1263,27 @@ function CadCanvas({
       return
     }
 
+    if (activeTool === 'ruler') {
+      if (!hasScaleDefinition) {
+        return
+      }
+
+      if (!rulerDraftStart) {
+        setRulerDraftStart(normPoint)
+        setRulerDraftCursor(null)
+        return
+      }
+
+      setRulerDraftStart(null)
+      setRulerDraftCursor(null)
+      return
+    }
+
     if (activeTool !== 'polygon') {
       return
     }
 
-    const stage = stageRef.current
-    const rawPoint = toStagePoint(stage)
-
-    if (!rawPoint) {
-      return
-    }
-
     // Store all points in image-normalized coords so they follow the PNG on resize.
-    const normPoint = stageToNorm(rawPoint, fittedBackgroundImage)
 
     if (isAwaitingScaleLine) {
       if (!scaleDraftStart) {
@@ -1203,7 +1296,7 @@ function CadCanvas({
       const completedSegment = {
         start: scaleDraftStart,
         end: normPoint,
-        lengthPixels: Math.hypot(rawPoint.x - scaleDraftStartStage.x, rawPoint.y - scaleDraftStartStage.y),
+        lengthPixels: getImagePixelDistance(scaleDraftStart, normPoint, loadedBackgroundImage),
       }
 
       setScaleReferenceSegment(completedSegment)
@@ -1456,6 +1549,18 @@ function CadCanvas({
       return
     }
 
+    if (activeTool === 'ruler') {
+      if (!hasScaleDefinition || !rulerDraftStart) {
+        return
+      }
+
+      const stage = stageRef.current
+      const rawPoint = toStagePoint(stage)
+      if (!rawPoint) return
+      setRulerDraftCursor(stageToNorm(rawPoint, fittedBackgroundImage))
+      return
+    }
+
     if (activeTool !== 'polygon') {
       return
     }
@@ -1643,7 +1748,7 @@ function CadCanvas({
 
   return (
     <div
-      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${activeTool === 'rectangle' || activeTool === 'polygon' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}${multiAddDraft ? ' is-multi-add' : ''}`}
+      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${activeTool === 'rectangle' || activeTool === 'polygon' || activeTool === 'ruler' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}${multiAddDraft ? ' is-multi-add' : ''}`}
       ref={containerRef}
       onMouseDownCapture={handleCanvasMouseDownCapture}
       onAuxClick={handleCanvasAuxClick}
@@ -1872,6 +1977,65 @@ function CadCanvas({
               )
             })() : null}
 
+            {rulerDraftStart && rulerDraftCursor && scaleDefinition?.metersPerPixel ? (() => {
+              const startStage = normToStage(rulerDraftStart, fittedBackgroundImage)
+              const cursorStage = normToStage(rulerDraftCursor, fittedBackgroundImage)
+              const distancePixels = getImagePixelDistance(rulerDraftStart, rulerDraftCursor, loadedBackgroundImage)
+              const distanceMeters = distancePixels * scaleDefinition.metersPerPixel
+              const midPoint = {
+                x: (startStage.x + cursorStage.x) / 2,
+                y: (startStage.y + cursorStage.y) / 2,
+              }
+              const labelText = `${distanceMeters.toFixed(2)} m`
+              const labelWidth = Math.max(52, Math.ceil(measureLabelText(labelText, 12)) + 12)
+              const labelHeight = 22
+
+              return (
+                <Group>
+                  <Line
+                    points={[startStage.x, startStage.y, cursorStage.x, cursorStage.y]}
+                    stroke={RULER_COLOR}
+                    strokeWidth={POLYGON_LINE_STROKE}
+                    lineCap="round"
+                    lineJoin="round"
+                    dash={[6, 4]}
+                  />
+                  <Circle
+                    x={startStage.x}
+                    y={startStage.y}
+                    radius={POLYGON_POINT_RADIUS}
+                    fill="#FFFFFF"
+                    stroke={RULER_COLOR}
+                    strokeWidth={POLYGON_POINT_STROKE}
+                  />
+                  <Rect
+                    x={midPoint.x - labelWidth / 2}
+                    y={midPoint.y - 30}
+                    width={labelWidth}
+                    height={labelHeight}
+                    fill="rgba(255, 255, 255, 0.95)"
+                    stroke={RULER_COLOR}
+                    strokeWidth={1}
+                    cornerRadius={3}
+                  />
+                  <Text
+                    x={midPoint.x - labelWidth / 2}
+                    y={midPoint.y - 28}
+                    width={labelWidth}
+                    height={labelHeight - 4}
+                    text={labelText}
+                    fontSize={12}
+                    fontFamily="Segoe UI, sans-serif"
+                    fontStyle="bold"
+                    fill="#38404D"
+                    align="center"
+                    verticalAlign="middle"
+                    listening={false}
+                  />
+                </Group>
+              )
+            })() : null}
+
             {multiAddDraft?.firstPoint && multiAddDraft?.cursorPoint ? (() => {
               const startStage = normToStage(multiAddDraft.firstPoint, fittedBackgroundImage)
               const cursorStage = normToStage(multiAddDraft.cursorPoint, fittedBackgroundImage)
@@ -1909,7 +2073,7 @@ function CadCanvas({
         )
       })() : null}
 
-      {(placedEquipments ?? []).map((equipment) => {
+      {(placedEquipments ?? []).filter((equipment) => isEquipmentIconVisible(equipment, equipmentFilters)).map((equipment) => {
         const visiblePoint = draggingEquipment?.id === equipment.id
           ? draggingEquipment.point
           : equipment.point
@@ -1924,9 +2088,10 @@ function CadCanvas({
             className={`cad-equipment-placement${isSelected ? ' is-selected' : ''}`}
             style={{ left: pixelX, top: pixelY }}
             onMouseDown={(event) => handleEquipmentMouseDown(event, equipment)}
+            onContextMenu={(event) => openEquipmentContextMenu(event, equipment.id)}
           >
             <img src={equipment.iconSrc} alt="" className="cad-equipment-placement__icon" draggable={false} />
-            {renamingEquipmentId === equipment.id ? (
+            {equipmentFilters?.text === false ? null : renamingEquipmentId === equipment.id ? (
               <input
                 ref={equipmentRenameInputRef}
                 className="cad-equipment-placement__input"
@@ -2120,6 +2285,48 @@ function CadCanvas({
             onClick={() => {
               onPolygonDeleteRequest?.(polygonContextMenu.polygonId)
               setPolygonContextMenu(null)
+            }}
+          >
+            <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+            <span className="cad-tree-context-menu__label">Excluir</span>
+          </button>
+        </div>
+      ) : null}
+
+      {equipmentContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${equipmentContextMenu.x}px`, top: `${equipmentContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onEquipmentRenameRequest?.(equipmentContextMenu.equipmentId)
+              setEquipmentContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Renomear</span>
+          </button>
+
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onEquipmentPropertiesRequest?.(equipmentContextMenu.equipmentId)
+              setEquipmentContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Propriedades</span>
+          </button>
+
+          <button
+            type="button"
+            className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+            onClick={() => {
+              onEquipmentDelete?.(equipmentContextMenu.equipmentId)
+              setEquipmentContextMenu(null)
             }}
           >
             <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />

@@ -2,6 +2,7 @@ export const initialProject = {
   id: 'novo-projeto',
   label: 'Novo Projeto',
   icon: 'project',
+  source: 'project',
   expanded: true,
   children: [
     {
@@ -20,9 +21,17 @@ export const initialProject = {
       icon: 'folder',
     },
     {
-      id: 'sala-de-automacao',
-      label: 'Sala de Automação',
-      icon: 'ambientes',
+      id: 'pavimento-1',
+      label: 'Novo Pavimento',
+      icon: 'pavimento',
+      source: 'pavimento',
+      children: [
+        {
+          id: 'sala-de-automacao',
+          label: 'Sala de Automação',
+          icon: 'ambientes',
+        },
+      ],
     },
   ],
 }

@@ -4,9 +4,9 @@ function ScaleSetupOverlay({ onStart }) {
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
 
   return (
-    <div className="cad-scale-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Definir escala">
+    <div className="cad-scale-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Propriedades">
       <section className="cad-scale-overlay" ref={panelRef} style={panelStyle}>
-        <header className="cad-scale-overlay__header" onPointerDown={onHandlePointerDown}>Definir escala</header>
+        <header className="cad-scale-overlay__header" onPointerDown={onHandlePointerDown}>Propriedades</header>
 
         <div className="cad-scale-overlay__content">
           <p className="cad-scale-overlay__text">

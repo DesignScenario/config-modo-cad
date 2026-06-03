@@ -4,7 +4,9 @@ function StatusBar({ version, connectionStatus, installationName, notificationLa
       <div className="cad-statusbar__item">Versão: {version}</div>
       <div className="cad-statusbar__item">Status conexão: {connectionStatus}</div>
       <div className="cad-statusbar__item cad-statusbar__item--grow">Instalação: {installationName}</div>
-      <div className="cad-statusbar__item cad-statusbar__item--right">{notificationLabel}</div>
+      {notificationLabel ? (
+        <div className="cad-statusbar__item cad-statusbar__item--right">{notificationLabel}</div>
+      ) : null}
     </footer>
   )
 }

@@ -10,10 +10,12 @@ import mais from '../assets/mais.svg'
 import menos from '../assets/menos.svg'
 import pasta from '../assets/pasta.svg'
 import moduloDiaNoite from '../assets/módulo-dia-noite.svg'
+import pavimentoAssociadoIcon from '../assets/pavimento-associado.svg'
+import pavimentoIcon from '../assets/pavimento.svg'
 import projeto from '../assets/projeto.svg'
 import setaMenuSuspenso from '../assets/seta-menu-suspenso-16px.svg'
 
-function TreeIcon({ item }) {
+function TreeIcon({ item, importedPlanPavimentoId }) {
   if (item.iconSrc) {
     return <img src={item.iconSrc} alt="" className="cad-tree-item__icon-image" />
   }
@@ -34,12 +36,23 @@ function TreeIcon({ item }) {
     return <img src={ambientes} alt="" className="cad-tree-item__icon-image" />
   }
 
+  if (item.icon === 'pavimento') {
+    return (
+      <img
+        src={importedPlanPavimentoId === item.id ? pavimentoAssociadoIcon : pavimentoIcon}
+        alt=""
+        className="cad-tree-item__icon-image"
+      />
+    )
+  }
+
   return null
 }
 
 function TreeNode({
   item,
   level = 0,
+  importedPlanPavimentoId,
   expandedIds,
   onToggleItem,
   selectedNodeId,
@@ -56,6 +69,8 @@ function TreeNode({
   const isRoot = level === 0
   const isEnvironment = item.source === 'created-environment'
   const isEquipmentItem = item.source === 'equipment-item'
+  const isPavimento = item.source === 'pavimento'
+  const isProject = item.source === 'project'
   const isRenaming = item.id === renamingNodeId
   const isSelected = item.id === selectedNodeId
   const handleRowClick = () => {
@@ -83,7 +98,7 @@ function TreeNode({
         >
           <span className="cad-tree-row__toggle" />
           <span className="cad-tree-row__icon">
-            <TreeIcon item={item} />
+            <TreeIcon item={item} importedPlanPavimentoId={importedPlanPavimentoId} />
           </span>
           <input
             className="cad-tree-rename-input"
@@ -117,7 +132,7 @@ function TreeNode({
                 : undefined
           }
           onContextMenu={
-            isEnvironment
+            (isEnvironment || isProject || isPavimento || isEquipmentItem)
               ? (event) => {
                   event.preventDefault()
                   onOpenContextMenu?.(event, item)
@@ -135,7 +150,7 @@ function TreeNode({
             ) : null}
           </span>
           <span className="cad-tree-row__icon">
-            <TreeIcon item={item} />
+            <TreeIcon item={item} importedPlanPavimentoId={importedPlanPavimentoId} />
           </span>
           <span className="cad-tree-row__label">{item.label}</span>
         </button>
@@ -148,6 +163,7 @@ function TreeNode({
               key={child.id}
               item={child}
               level={level + 1}
+              importedPlanPavimentoId={importedPlanPavimentoId}
               expandedIds={expandedIds}
               onToggleItem={onToggleItem}
               selectedNodeId={selectedNodeId}
@@ -168,6 +184,7 @@ function TreeNode({
 
 function ProjectTree({
   project,
+  importedPlanPavimentoId,
   selectedNodeId,
   renamingNodeId,
   onSelectNode,
@@ -177,12 +194,20 @@ function ProjectTree({
   onDeleteNode,
   onEditNode,
   onFocusNode,
+  onAddPavimento,
+  onAddEnvironment,
+  onImportFileRequest,
+  onDefineScale,
 }) {
   const [query, setQuery] = useState('')
   const [contextMenu, setContextMenu] = useState(null)
-  const [expandedIds, setExpandedIds] = useState(() =>
-    new Set([project.id, 'sala-de-automacao']),
-  )
+  const [expandedIds, setExpandedIds] = useState(() => {
+    const ids = new Set([project.id])
+    project.children?.forEach((child) => {
+      if (child.source === 'pavimento') ids.add(child.id)
+    })
+    return ids
+  })
   const treeViewRef = useRef(null)
 
   useEffect(() => {
@@ -252,7 +277,11 @@ function ProjectTree({
 
     const bounds = container.getBoundingClientRect()
     const menuWidth = 172
-    const menuHeight = 92
+    const menuHeight = node.source === 'pavimento'
+      ? 165
+      : node.source === 'project'
+        ? 140
+        : 92
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
 
@@ -262,6 +291,8 @@ function ProjectTree({
       node,
     })
   }
+
+  const treeSelectedNodeId = contextMenu ? contextMenu.node.id : selectedNodeId
 
   return (
     <section className="cad-panel cad-panel--tree" aria-label="Projeto">
@@ -318,9 +349,10 @@ function ProjectTree({
       <div className="cad-tree-view" ref={treeViewRef}>
         <TreeNode
           item={tree}
+          importedPlanPavimentoId={importedPlanPavimentoId}
           expandedIds={expandedIds}
           onToggleItem={onToggleItem}
-          selectedNodeId={selectedNodeId}
+          selectedNodeId={treeSelectedNodeId}
           renamingNodeId={renamingNodeId}
           onSelectNode={onSelectNode}
           onRenameRequest={onRenameRequest}
@@ -336,39 +368,177 @@ function ProjectTree({
             style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <button
-              type="button"
-              className="cad-tree-context-menu__item"
-              onClick={() => {
-                onRenameRequest?.(contextMenu.node)
-                setContextMenu(null)
-              }}
-            >
-              <span className="cad-tree-context-menu__label">Renomear</span>
-            </button>
+            {contextMenu.node.source === 'project' ? (
+              <>
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onAddPavimento?.()
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Novo Pavimento</span>
+                </button>
 
-            <button
-              type="button"
-              className="cad-tree-context-menu__item"
-              onClick={() => {
-                onEditNode?.(contextMenu.node)
-                setContextMenu(null)
-              }}
-            >
-              <span className="cad-tree-context-menu__label">Editar</span>
-            </button>
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onAddEnvironment?.()
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Novo Ambiente</span>
+                </button>
 
-            <button
-              type="button"
-              className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
-              onClick={() => {
-                onDeleteNode?.(contextMenu.node)
-                setContextMenu(null)
-              }}
-            >
-              <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
-              <span className="cad-tree-context-menu__label">Excluir</span>
-            </button>
+                <div className="cad-tree-context-menu__divider" />
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onRenameRequest?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Renomear</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => setContextMenu(null)}
+                >
+                  <span className="cad-tree-context-menu__label">Gerar Room-Controls</span>
+                </button>
+              </>
+            ) : contextMenu.node.source === 'pavimento' ? (
+              <>
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onImportFileRequest?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Importar arquivo</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onDefineScale?.()
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Propriedades</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onAddEnvironment?.()
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Novo Ambiente</span>
+                </button>
+
+                <div className="cad-tree-context-menu__divider" />
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onRenameRequest?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Renomear</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => setContextMenu(null)}
+                >
+                  <span className="cad-tree-context-menu__label">Gerar Room-Controls</span>
+                </button>
+              </>
+            ) : contextMenu.node.source === 'equipment-item' ? (
+              <>
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onRenameRequest?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Renomear</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => setContextMenu(null)}
+                >
+                  <span className="cad-tree-context-menu__label">Propriedades</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+                  onClick={() => {
+                    onDeleteNode?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+                  <span className="cad-tree-context-menu__label">Excluir</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onRenameRequest?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Renomear</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item"
+                  onClick={() => {
+                    onEditNode?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <span className="cad-tree-context-menu__label">Editar</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+                  onClick={() => {
+                    onDeleteNode?.(contextMenu.node)
+                    setContextMenu(null)
+                  }}
+                >
+                  <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+                  <span className="cad-tree-context-menu__label">Excluir</span>
+                </button>
+              </>
+            )}
           </div>
         ) : null}
       </div>

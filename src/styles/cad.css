@@ -10,7 +10,7 @@
   --cad-text: #222222;
   --cad-text-muted: #5f6670;
   --cad-accent: #e7cc84;
-  --cad-blue: #1f5fe0;
+  --cad-blue: #38404D;
   --cad-mono: 'Segoe UI', sans-serif;
 }
 
@@ -361,11 +361,11 @@ body.is-dragging-overlay * {
 .cad-tree-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 14px 16px minmax(0, 1fr);
+  grid-template-columns: 16px 16px minmax(0, 1fr);
   align-items: center;
   gap: 4px;
   height: 23px;
-  padding: 0 6px 0 calc(6px + (var(--tree-level, 0) * 12px));
+  padding: 0 6px 0 calc((var(--tree-level) - 1) * 12px + 6px);
   font-size: 12px;
   color: #1f1f1f;
   border-radius: 2px;
@@ -432,6 +432,12 @@ body.is-dragging-overlay * {
 
 .cad-tree-context-menu__label {
   line-height: 1;
+}
+
+.cad-tree-context-menu__divider {
+  height: 1px;
+  background: #bababa;
+  margin: 3px 0;
 }
 
 .cad-tree-row__toggle,
@@ -606,7 +612,7 @@ body.is-dragging-overlay * {
   border-radius: 2px;
   color: #222222;
   font-size: 11px;
-  background: #f8f8f8;
+  background: transparent;
 }
 
 .cad-toolbar-zoom-field input {
@@ -671,7 +677,21 @@ body.is-dragging-overlay * {
 }
 
 .cad-toolbar-icon-btn.is-filter-active {
-  background: #d8eefc;
+  background: transparent
+}
+
+.cad-toolbar-icon-btn.is-filter-active:hover {
+  background: #f3f3f3;
+}
+
+.cad-toolbar-icon-btn.is-filter-inactive {
+  background: transparent;
+  opacity: 0.25;
+}
+
+.cad-toolbar-icon-btn.is-filter-inactive:hover {
+  background: #f3f3f3;
+  opacity: 0.7;
 }
 
 .cad-icon-basic {
@@ -911,9 +931,9 @@ body.is-dragging-overlay * {
 
 .cad-equipment-overlay__tab {
   height: 22px;
-  border: 1px solid #aaaaaa;
+  border: 1px solid #c8c8c8;
   border-bottom: 0;
-  background: #dddddd;
+  background: linear-gradient(to bottom, #eeeeee 0%, #d9d9d9 100%);
   color: #3a3a3a;
   font-size: 12px;
   font-family: 'Segoe UI', sans-serif;
@@ -974,14 +994,14 @@ body.is-dragging-overlay * {
 }
 
 .cad-equip-tree-node {
-  margin-left: calc(var(--equip-level) * 12px);
+  margin-left: 0;
 }
 
 .cad-equip-tree-row {
   width: 100%;
   height: 23px;
   display: grid;
-  grid-template-columns: 14px 16px minmax(0, 1fr);
+  grid-template-columns: 16px 16px minmax(0, 1fr);
   align-items: center;
   gap: 4px;
   border: 0;
@@ -990,7 +1010,7 @@ body.is-dragging-overlay * {
   font-size: 12px;
   font-family: 'Segoe UI', sans-serif;
   text-align: left;
-  padding: 0 6px;
+  padding: 0 6px 0 calc(var(--equip-level) * 12px + 6px);
 }
 
 .cad-equip-tree-row:hover {
@@ -1511,6 +1531,7 @@ body.is-dragging-overlay * {
 }
 
 .cad-environment-overlay__input--numeric {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
@@ -1573,6 +1594,270 @@ body.is-dragging-overlay * {
   align-self: center;
   margin-top: 4px;
 }
+
+/* -----------------------------------------------------------------------
+   Radio buttons (Novo ambiente / Associar ambiente)
+----------------------------------------------------------------------- */
+
+.cad-environment-overlay__radio-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.cad-environment-overlay__radio-btn {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  background: #f9f9f9;
+  border: 1px solid #c9cfd2;
+  border-radius: 4px;
+  box-shadow: 0 1px 1px rgba(201, 207, 210, 0.5);
+  font-size: 11px;
+  color: #000000;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cad-environment-overlay__radio-btn:hover:not(:disabled) {
+  background: #f0f3f5;
+}
+
+.cad-environment-overlay__radio-btn.is-selected {
+  background: #E7E8EA;
+  border-color: #38404D;
+  box-shadow: 0 0 0 1px #38404D;
+}
+
+.cad-environment-overlay__radio-btn.is-disabled,
+.cad-environment-overlay__radio-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cad-environment-overlay__radio-icon {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid #7a8899;
+  flex: 0 0 12px;
+  position: relative;
+}
+
+.cad-environment-overlay__radio-btn.is-selected .cad-environment-overlay__radio-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38404D;
+  transform: translate(-50%, -50%);
+}
+
+/* Library open button inside Name field */
+
+.cad-environment-overlay__input--with-lib-btn {
+  padding-right: 32px;
+}
+
+.cad-environment-overlay__lib-btn {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 28px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-top-right-radius: 2px;
+  border-bottom-right-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cad-environment-overlay__lib-btn:hover {
+  background: #e8edf5;
+}
+
+.cad-environment-overlay__lib-btn-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* Associate combobox */
+
+.cad-environment-overlay__assoc-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 27px;
+  border: 1px solid #bababa;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
+  padding: 0 28px 0 8px;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #202020;
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+}
+
+.cad-environment-overlay__assoc-field .cad-environment-overlay__name-toggle-icon {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.cad-environment-overlay__assoc-value {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* -----------------------------------------------------------------------
+   Environment Library Overlay
+----------------------------------------------------------------------- */
+
+.cad-env-library-overlay {
+  position: absolute;
+  top: calc(50% - 160px);
+  left: calc(50% + 170px);
+  width: 580px;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 4px 4px 3px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  pointer-events: auto;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+}
+
+.cad-env-library-overlay__header {
+  height: 40px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1d242c;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  cursor: grab;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.cad-env-library-overlay__close-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #ffffff;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.cad-env-library-overlay__close-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cad-env-library-overlay__content {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 300px;
+}
+
+.cad-env-library-overlay__list-panel {
+  width: 240px;
+  flex: 0 0 240px;
+  border-right: 1px solid #d8d8d8;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cad-env-library-overlay__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.cad-env-library-overlay__list-item {
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  border-bottom: 1px solid #f0f0f0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #202020;
+  cursor: pointer;
+  display: block;
+}
+
+.cad-env-library-overlay__list-item:hover {
+  background: #f0f4fa;
+}
+
+.cad-env-library-overlay__list-item.is-selected {
+  background: #F5D59D;
+  box-shadow: inset 0 0 0 2px #F8E1B9;
+  color: #000000;
+  font-weight: 400;
+}
+
+.cad-env-library-overlay__preview {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  overflow: hidden;
+}
+
+.cad-env-library-overlay__preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.cad-env-library-overlay__footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border-top: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+
 
 .cad-statusbar {
   height: 24px;
@@ -1744,4 +2029,404 @@ body.is-dragging-overlay * {
 
 .cad-delete-confirm-overlay__btn:hover {
   background: linear-gradient(180deg, #e0e0e0 0%, #cccccc 100%);
+}
+
+/* ── Equipment Properties Overlay ────────────────────────── */
+
+.cad-equip-props-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  pointer-events: auto;
+}
+
+.cad-equip-props-overlay {
+  width: 600px;
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 4px 3px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.cad-equip-props-overlay__header {
+  height: 40px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 8px 16px;
+  background: #1d242c;
+  color: #ffffff;
+  cursor: grab;
+  user-select: none;
+}
+
+.cad-equip-props-overlay__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.cad-equip-props-overlay__close {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #d5dae0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.cad-equip-props-overlay__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.cad-equip-props-overlay__frame {
+  flex: 1 1 auto;
+  min-height: 0;
+
+  background: #f8f8f8;
+}
+
+.cad-equip-props-overlay__panel,
+.cad-equip-props-overlay__default-state {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #c8c8c8;
+  background: #ffffff;
+}
+
+.cad-equip-props-overlay__default-state {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #1a1a1a;
+  font-size: 16px;
+  line-height: 1.35;
+  text-align: center;
+  font-style: italic;
+}
+
+.cad-equip-props-overlay__panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.cad-equip-props-overlay__panel-header {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background: #38404d;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cad-equip-props-overlay__tabs {
+  height: 28px;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  padding: 4px 0 0 5px;
+  background: #dcdcdc;
+  border-bottom: 1px solid #b5b5b5;
+}
+
+.cad-equip-props-overlay__tab {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid #b5b5b5;
+  border-bottom: 0;
+  border-top-left-radius: 2px;
+  border-top-right-radius: 2px;
+  background: linear-gradient(180deg, #eeeeee 0%, #d9d9d9 100%);
+  color: #323232;
+  font-size: 12px;
+}
+
+.cad-equip-props-overlay__tab.is-active {
+  background: #f4f4f4;
+}
+
+.cad-equip-props-overlay__scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.cad-equip-props-overlay__scroll-area--with-tabs {
+  border-top: 0;
+}
+
+.cad-equip-props-overlay__content-column {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 15px 30px 20px;
+}
+
+.cad-equip-props-overlay__content-column--luminaria {
+  gap: 5px;
+  padding-top: 16px;
+}
+
+.cad-equip-props-overlay__content-column--keypad {
+  gap: 24px;
+}
+
+.cad-equip-props-overlay__equipment-name {
+  margin: 0;
+  color: #2d9afd;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.cad-equip-props-overlay__section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cad-equip-props-overlay__section-title {
+  color: #2d9afd;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.cad-equip-props-overlay__card {
+  position: relative;
+  width: 450px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid #e6e6e6;
+  padding: 20px 16px;
+}
+
+.cad-equip-props-overlay__content-column--keypad .cad-equip-props-overlay__card {
+  width: 461px;
+}
+
+.cad-equip-props-overlay__card-title {
+  position: absolute;
+  left: 19px;
+  top: -10px;
+  padding: 0 4px;
+  background: #ffffff;
+  color: #000000;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.cad-equip-props-overlay__checkbox-row,
+.cad-equip-props-overlay__advanced-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cad-equip-props-overlay__checkbox-row--compact {
+  gap: 4px;
+}
+
+.cad-equip-props-overlay__checkbox {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  background: #ececec;
+  color: #1a1a1a;
+  font-size: 13px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.cad-equip-props-overlay__field-row {
+  width: 245px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cad-equip-props-overlay__field-row.is-wide {
+  width: 100%;
+}
+
+.cad-equip-props-overlay__inline-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cad-equip-props-overlay__field-label,
+.cad-equip-props-overlay__field-value,
+.cad-equip-props-overlay__swatch-label,
+.cad-equip-props-overlay__slider-scale,
+.cad-equip-props-overlay__action-btn {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.cad-equip-props-overlay__field-label,
+.cad-equip-props-overlay__field-value {
+  color: #000000;
+}
+
+.cad-equip-props-overlay__input {
+  height: 25px;
+  padding: 0 7px;
+  border: 1px solid #bababa;
+  border-radius: 2px;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.cad-equip-props-overlay__select {
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 0 8px;
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #eeeeee 0%, #d9d9d9 100%);
+  color: #323232;
+  font-size: 12px;
+}
+
+.cad-equip-props-overlay__select-arrow {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid #4e545f;
+}
+
+.cad-equip-props-overlay__info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.cad-equip-props-overlay__info-pair {
+  display: grid;
+  grid-template-columns: 92px auto;
+  gap: 40px;
+  align-items: center;
+}
+
+.cad-equip-props-overlay__swatches {
+  display: flex;
+  align-items: flex-end;
+  gap: 32px;
+  padding-left: 5px;
+}
+
+.cad-equip-props-overlay__swatch-group {
+  width: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.cad-equip-props-overlay__swatch-label {
+  text-align: center;
+}
+
+.cad-equip-props-overlay__swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #000000;
+}
+
+.cad-equip-props-overlay__sensor-group,
+.cad-equip-props-overlay__nested-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cad-equip-props-overlay__nested-block {
+  margin-top: 10px;
+}
+
+.cad-equip-props-overlay__slider-block {
+  width: 273px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cad-equip-props-overlay__slider-track {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #bcbcbc;
+  background: linear-gradient(180deg, #bcbcbc 0%, #fefefe 50%, #bcbcbc 100%);
+}
+
+.cad-equip-props-overlay__slider-thumb {
+  position: absolute;
+  top: -1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #8d8d8d;
+  background: linear-gradient(180deg, #ffffff 0%, #dadada 100%);
+  transform: translateX(-50%);
+}
+
+.cad-equip-props-overlay__slider-scale {
+  display: flex;
+  justify-content: space-between;
+  color: #323232;
+}
+
+.cad-equip-props-overlay__advanced-row {
+  gap: 8px;
+}
+
+.cad-equip-props-overlay__info-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #5a9cdd;
+  border-radius: 50%;
+  color: #5a9cdd;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.cad-equip-props-overlay__action-btn {
+  height: 25px;
+  padding: 0 12px;
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #eeeeee 0%, #d9d9d9 100%);
+  color: #323232;
 }

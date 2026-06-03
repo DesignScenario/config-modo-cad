@@ -14,6 +14,7 @@ import interfaceComunicacao from '../assets/interface-de-comunicação.svg'
 import interfaces from '../assets/interfaces.svg'
 import keypadWifi1 from '../assets/keypad-wifi-1.svg'
 import keypadWifi2 from '../assets/keypad-wifi-2.svg'
+import keypadWifi3 from '../assets/keypad-wifi-3.svg'
 import keypads from '../assets/keypads.svg'
 import led from '../assets/led.svg'
 import limpar from '../assets/limpar.svg'
@@ -30,7 +31,7 @@ import sensor from '../assets/sensor.svg'
 import sensores from '../assets/sensores.svg'
 import tw10 from '../assets/tw10.svg'
 import tw4 from '../assets/tw4.svg'
-import { equipmentLibraryTabs } from '../data/equipmentLibrary.js'
+import { equipmentLibraryTabs, getEquipmentFilterKeys } from '../data/equipmentLibrary.js'
 import { useDraggable } from '../hooks/useDraggable.js'
 
 const TAB_NAMES = ['Ambiente', 'Scenario', 'Drivers']
@@ -55,6 +56,7 @@ const ICON_MAP = {
   interfaces,
   'keypad-wifi-1': keypadWifi1,
   'keypad-wifi-2': keypadWifi2,
+  'keypad-wifi-3': keypadWifi3,
   keypads,
   led,
   'modulo-dia-noite': moduloDiaNoite,
@@ -136,6 +138,7 @@ function EquipmentTreeNode({
   const isExpanded = expandedIds.has(item.id)
   const isSelected = selectedItemId === item.id
   const iconSrc = ICON_MAP[item.icon] ?? pasta
+  const filterKeys = hasChildren ? [] : getEquipmentFilterKeys(item.id)
 
   const handleDragStart = (event) => {
     if (hasChildren) {
@@ -146,9 +149,11 @@ function EquipmentTreeNode({
       'application/x-equipment-item',
       JSON.stringify({
         id: item.id,
+        catalogItemId: item.id,
         label: item.label,
         iconKey: item.icon,
         iconSrc,
+        filterKeys,
       }),
     )
     event.dataTransfer.effectAllowed = 'copy'
@@ -387,9 +392,11 @@ function EquipmentLibraryOverlay({ onClose, onStartMultiAddPlacement }) {
             quantity,
             equipment: {
               id: multiAddItem.id,
+              catalogItemId: multiAddItem.id,
               label: multiAddItem.label,
               iconKey: multiAddItem.icon,
               iconSrc: ICON_MAP[multiAddItem.icon] ?? pasta,
+              filterKeys: getEquipmentFilterKeys(multiAddItem.id),
             },
           })
           setMultiAddItem(null)
