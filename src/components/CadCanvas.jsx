@@ -1,6 +1,7 @@
 import { Circle, Group, Layer, Line, Rect, Stage, Text, Image as KonvaImage } from 'react-konva'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import apagarProjeto from '../assets/apagar-projeto.svg'
+import { EQUIPMENT_WIREFRAMES } from '../data/wireframes'
 
 const POLYGON_COLOR = '#6BC2F7'
 const RULER_COLOR = '#FC4242'
@@ -2088,15 +2089,29 @@ function CadCanvas({
         const pixelY = stagePoint.y
         const isSelected = selectedEquipmentId === equipment.id
 
+        const wireframeEntry = zoom >= 500 ? (EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null) : null
+        const showWireframe = wireframeEntry != null && scaleDefinition != null
+        const wireframeDims = showWireframe ? {
+          width: (wireframeEntry.widthMm / 1000) * scaleDefinition.pixelsPerMeter * zoomScale,
+          height: (wireframeEntry.heightMm / 1000) * scaleDefinition.pixelsPerMeter * zoomScale,
+        } : null
+
         return (
           <div
             key={equipment.id}
-            className={`cad-equipment-placement${isSelected ? ' is-selected' : ''}`}
-            style={{ left: pixelX, top: pixelY }}
+            className={`cad-equipment-placement${isSelected ? ' is-selected' : ''}${showWireframe ? ' cad-equipment-placement--wireframe' : ''}`}
+            style={wireframeDims
+              ? { left: pixelX, top: pixelY, width: wireframeDims.width, height: wireframeDims.height }
+              : { left: pixelX, top: pixelY }
+            }
             onMouseDown={(event) => handleEquipmentMouseDown(event, equipment)}
             onContextMenu={(event) => openEquipmentContextMenu(event, equipment.id)}
           >
-            <img src={equipment.iconSrc} alt="" className="cad-equipment-placement__icon" draggable={false} />
+            {showWireframe ? (
+              <img src={wireframeEntry.svgUrl} alt="" className="cad-equipment-placement__wireframe" draggable={false} />
+            ) : (
+              <img src={equipment.iconSrc} alt="" className="cad-equipment-placement__icon" draggable={false} />
+            )}
             {equipmentFilters?.text === false ? null : renamingEquipmentId === equipment.id ? (
               <input
                 ref={equipmentRenameInputRef}
