@@ -562,6 +562,7 @@ function CadCanvas({
   zoom,
   imageRotation,
   backgroundImage,
+  backgroundOpacity,
   onZoomChange,
   hasScaleDefinition,
   scaleDefinition,
@@ -615,6 +616,10 @@ function CadCanvas({
   const equipmentRenameOpenedAtRef = useRef(0)
   const size = useElementSize(containerRef)
   const zoomScale = useMemo(() => zoom / 100, [zoom])
+  const backgroundImageOpacity = useMemo(() => {
+    const parsedOpacity = Number.isFinite(backgroundOpacity) ? backgroundOpacity : 100
+    return Math.min(100, Math.max(0, parsedOpacity)) / 100
+  }, [backgroundOpacity])
   const [polygons, setPolygons] = useState([])
   const [draftPolygonPoints, setDraftPolygonPoints] = useState([])
   const [draftPolygonCursor, setDraftPolygonCursor] = useState(null)
@@ -1785,6 +1790,7 @@ function CadCanvas({
                 offsetX={(fittedBackgroundImage?.width ?? canvasWidth) / 2}
                 offsetY={(fittedBackgroundImage?.height ?? canvasHeight) / 2}
                 rotation={fittedBackgroundImage?.rotation ?? 0}
+                opacity={backgroundImageOpacity}
               />
             ) : null}
 

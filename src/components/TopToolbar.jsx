@@ -60,9 +60,15 @@ function IconButton({ title, active = false, pressed = active, onClick, children
 
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
+const MIN_OPACITY = 0
+const MAX_OPACITY = 100
 
 function clampZoom(value) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+}
+
+function clampOpacity(value) {
+  return Math.min(MAX_OPACITY, Math.max(MIN_OPACITY, value))
 }
 
 function TopToolbar({
@@ -70,16 +76,23 @@ function TopToolbar({
   onToolChange,
   zoom,
   onZoomChange,
+  opacity,
+  onOpacityChange,
   onToggleEquipmentLibrary,
   onRotateImage,
   equipmentFilters,
   onToggleEquipmentFilter,
 }) {
   const [zoomInput, setZoomInput] = useState(String(zoom))
+  const [opacityInput, setOpacityInput] = useState(String(opacity))
 
   useEffect(() => {
     setZoomInput(String(zoom))
   }, [zoom])
+
+  useEffect(() => {
+    setOpacityInput(String(opacity))
+  }, [opacity])
 
   const commitZoomValue = () => {
     const parsed = Number.parseInt(zoomInput, 10)
@@ -92,6 +105,19 @@ function TopToolbar({
     const nextZoom = clampZoom(parsed)
     setZoomInput(String(nextZoom))
     onZoomChange?.(nextZoom)
+  }
+
+  const commitOpacityValue = () => {
+    const parsed = Number.parseInt(opacityInput, 10)
+
+    if (Number.isNaN(parsed)) {
+      setOpacityInput(String(opacity))
+      return
+    }
+
+    const nextOpacity = clampOpacity(parsed)
+    setOpacityInput(String(nextOpacity))
+    onOpacityChange?.(nextOpacity)
   }
 
   return (
@@ -219,28 +245,57 @@ function TopToolbar({
 
         </div>
 
-        <div className="cad-toolbar-zoom">
+        <div className="cad-toolbar-floor-controls" aria-label="Controles da planta baixa">
           <Divider />
-          <label className="cad-toolbar-zoom-field" title="Zoom">
-            <input
-              type="number"
-              min={MIN_ZOOM}
-              max={MAX_ZOOM}
-              step="1"
-              value={zoomInput}
-              onChange={(event) => {
-                setZoomInput(event.target.value)
-              }}
-              onBlur={() => setZoomInput(String(zoom))}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  commitZoomValue()
-                  event.currentTarget.blur()
-                }
-              }}
-            />
-            <span>%</span>
-          </label>
+          <div className="cad-toolbar-floor-control" title="Transparência">
+            <span className="cad-toolbar-floor-control__label">Transparência:</span>
+            <label className="cad-toolbar-floor-control__input">
+              <input
+                type="number"
+                min={MIN_OPACITY}
+                max={MAX_OPACITY}
+                step="1"
+                value={opacityInput}
+                onChange={(event) => {
+                  setOpacityInput(event.target.value)
+                }}
+                onBlur={() => setOpacityInput(String(opacity))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    commitOpacityValue()
+                    event.currentTarget.blur()
+                  }
+                }}
+                aria-label="Valor da transparência"
+              />
+              <span>%</span>
+            </label>
+          </div>
+          <Divider />
+          <div className="cad-toolbar-floor-control" title="Zoom">
+            <span className="cad-toolbar-floor-control__label">Zoom:</span>
+            <label className="cad-toolbar-floor-control__input">
+              <input
+                type="number"
+                min={MIN_ZOOM}
+                max={MAX_ZOOM}
+                step="1"
+                value={zoomInput}
+                onChange={(event) => {
+                  setZoomInput(event.target.value)
+                }}
+                onBlur={() => setZoomInput(String(zoom))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    commitZoomValue()
+                    event.currentTarget.blur()
+                  }
+                }}
+                aria-label="Valor do zoom"
+              />
+              <span>%</span>
+            </label>
+          </div>
         </div>
       </div>
     </section>

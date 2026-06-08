@@ -20,6 +20,8 @@ const AUTOMATION_ROOM_ID = 'sala-de-automacao'
 const PROJECT_ROOT_ID = 'novo-projeto'
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
+const MIN_OPACITY = 0
+const MAX_OPACITY = 100
 const ENVIRONMENT_CLASS_OPTIONS = [
   'Não definida',
   'Dormitório',
@@ -44,11 +46,15 @@ const ENVIRONMENT_CLASS_COLOR_MAP = {
   'Externo': '#6BC2F7',
   'Trabalho': '#6BC2F7',
   'Garagem': '#6BC2F7',
-  'Apoio': '#FC8DCA',
+  'Apoio': '#6BC2F7',
 }
 
 function clampZoom(value) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value))
+}
+
+function clampOpacity(value) {
+  return Math.min(MAX_OPACITY, Math.max(MIN_OPACITY, value))
 }
 
 function cloneProjectTree(project) {
@@ -192,6 +198,7 @@ function isEquipmentVisibleByFilters(equipment, filters) {
 function App() {
   const [activeTool, setActiveTool] = useState('select')
   const [zoom, setZoom] = useState(100)
+  const [backgroundOpacity, setBackgroundOpacity] = useState(100)
   const [sidebarWidth, setSidebarWidth] = useState(300)
   const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(true)
   const [importedImage, setImportedImage] = useState(null)
@@ -325,6 +332,10 @@ function App() {
 
   const handleZoomChange = (nextZoom) => {
     setZoom(clampZoom(nextZoom))
+  }
+
+  const handleBackgroundOpacityChange = (nextOpacity) => {
+    setBackgroundOpacity(clampOpacity(nextOpacity))
   }
 
   const handleRotateImage = () => {
@@ -1058,6 +1069,8 @@ function App() {
               onToolChange={setActiveTool}
               zoom={zoom}
               onZoomChange={handleZoomChange}
+              opacity={backgroundOpacity}
+              onOpacityChange={handleBackgroundOpacityChange}
               onToggleEquipmentLibrary={() => setShowEquipmentLibrary((current) => !current)}
               onRotateImage={handleRotateImage}
               equipmentFilters={equipmentFilters}
@@ -1069,6 +1082,7 @@ function App() {
                 zoom={zoom}
                 imageRotation={imageRotation}
                 backgroundImage={importedImage}
+                backgroundOpacity={backgroundOpacity}
                 onZoomChange={handleZoomChange}
                 hasScaleDefinition={Boolean(scaleDefinition)}
                 scaleDefinition={scaleDefinition}

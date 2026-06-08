@@ -554,7 +554,7 @@ body.is-dragging-overlay * {
   flex: 1 1 auto;
 }
 
-.cad-toolbar-zoom {
+.cad-toolbar-floor-controls {
   display: flex;
   align-items: center;
   height: 36px;
@@ -600,37 +600,55 @@ body.is-dragging-overlay * {
 }
 
 
-.cad-toolbar-zoom-field {
-  height: 22px;
-  min-width: 66px;
-  padding: 0 6px;
+.cad-toolbar-floor-control {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  color: #000000;
+  font-size: 12px;
+}
+
+.cad-toolbar-floor-control__label {
+  font-size: 12px;
+  line-height: normal;
+  white-space: nowrap;
+}
+
+.cad-toolbar-floor-control__input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  color: #222222;
-  font-size: 11px;
-  background: transparent;
+  padding: 4px 4px 5px;
+  color: #000000;
+  font-size: 12px;
+  line-height: normal;
 }
 
-.cad-toolbar-zoom-field input {
-  width: 38px;
+.cad-toolbar-floor-control__input input {
+  width: 28px;
   border: 0;
   background: transparent;
   outline: none;
   text-align: right;
   padding: 0;
-  font-size: 11px;
+  color: #000000;
+  font-size: 12px;
+  line-height: normal;
   appearance: textfield;
   -moz-appearance: textfield;
 }
 
-.cad-toolbar-zoom-field input::-webkit-outer-spin-button,
-.cad-toolbar-zoom-field input::-webkit-inner-spin-button {
+.cad-toolbar-floor-control__input input::-webkit-outer-spin-button,
+.cad-toolbar-floor-control__input input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+.cad-toolbar-floor-control__input span {
+  color: #000000;
+  font-size: 12px;
+  line-height: normal;
 }
 
 .cad-toolbar-menu-action--library {
