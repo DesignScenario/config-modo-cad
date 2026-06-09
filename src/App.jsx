@@ -10,9 +10,10 @@ import ScaleValueOverlay from './components/ScaleValueOverlay.jsx'
 import DeleteEnvironmentConfirmOverlay from './components/DeleteEnvironmentConfirmOverlay.jsx'
 import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
 import EquipmentPropertiesOverlay from './components/EquipmentPropertiesOverlay.jsx'
+import AutomationBoardOverlay from './components/AutomationBoardOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
-import { createDefaultEquipmentFilters } from './data/equipmentLibrary.js'
+import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, isBoardOnlyItem, getBoardSlotCount } from './data/equipmentLibrary.js'
 import { initialProject } from './data/initialProject.js'
 import './styles/cad.css'
 
@@ -59,6 +60,16 @@ function clampOpacity(value) {
 
 function cloneProjectTree(project) {
   return JSON.parse(JSON.stringify(project))
+}
+
+function findNodeById(node, nodeId) {
+  if (node.id === nodeId) return node
+  if (!node.children?.length) return null
+  for (const child of node.children) {
+    const found = findNodeById(child, nodeId)
+    if (found) return found
+  }
+  return null
 }
 
 function removeNodeById(node, nodeId) {
@@ -207,6 +218,8 @@ function App() {
   const [showScaleValueOverlay, setShowScaleValueOverlay] = useState(false)
   const [showEquipmentLibrary, setShowEquipmentLibrary] = useState(false)
   const [multiAddPlacementRequest, setMultiAddPlacementRequest] = useState(null)
+  const [automationBoards, setAutomationBoards] = useState([])
+  const [pendingBoardPlacement, setPendingBoardPlacement] = useState(null)
   const [isAwaitingScaleLine, setIsAwaitingScaleLine] = useState(false)
   const [pendingScaleSegment, setPendingScaleSegment] = useState(null)
   const [scaleDefinition, setScaleDefinition] = useState(null)
@@ -222,12 +235,15 @@ function App() {
   const [defaultCeilingHeight, setDefaultCeilingHeight] = useState('3')
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState(null)
   const [selectedEquipmentId, setSelectedEquipmentId] = useState(null)
+  const [selectedBoardId, setSelectedBoardId] = useState(null)
   const [equipmentFilters, setEquipmentFilters] = useState(() => createDefaultEquipmentFilters())
   const [equipmentPropertiesId, setEquipmentPropertiesId] = useState(null)
   const [renamingEnvironmentId, setRenamingEnvironmentId] = useState(null)
   const [renamingSource, setRenamingSource] = useState(null)
   const [renamingEquipmentId, setRenamingEquipmentId] = useState(null)
   const [renamingEquipmentSource, setRenamingEquipmentSource] = useState(null)
+  const [renamingBoardId, setRenamingBoardId] = useState(null)
+  const [renamingBoardSource, setRenamingBoardSource] = useState(null)
   const [renamingGenericNodeId, setRenamingGenericNodeId] = useState(null)
   const [polygonDeleteRequestId, setPolygonDeleteRequestId] = useState(null)
   const [pendingDeletePolygonId, setPendingDeletePolygonId] = useState(null)
@@ -314,12 +330,17 @@ function App() {
     setDefaultCeilingHeight('3')
     setSelectedEnvironmentId(null)
     setSelectedEquipmentId(null)
+    setSelectedBoardId(null)
     setRenamingEnvironmentId(null)
     setRenamingSource(null)
     setRenamingEquipmentId(null)
     setRenamingEquipmentSource(null)
+    setRenamingBoardId(null)
+    setRenamingBoardSource(null)
     setShowEquipmentLibrary(false)
     setMultiAddPlacementRequest(null)
+    setAutomationBoards([])
+    setPendingBoardPlacement(null)
 
     const fallbackPavimentoId = findFirstPavimentoId(initialProject)
     setImportedPlanPavimentoId(targetPavimentoId ?? fallbackPavimentoId)
@@ -432,6 +453,7 @@ function App() {
     if (env) {
       setProjectTree((curr) => removeNodeById(curr, env.id))
     }
+    setAutomationBoards((curr) => curr.filter((b) => b.polygonId !== polygonId))
     setEditingEnvironmentId((currentEditingId) => (env?.id === currentEditingId ? null : currentEditingId))
     setShowEnvironmentOverlay((currentVisible) => (isDeletedEditingEnvironment ? false : currentVisible))
     setSelectedEnvironmentId((currentSelectedId) => (env?.id === currentSelectedId ? null : currentSelectedId))
@@ -440,7 +462,141 @@ function App() {
     )
   }
 
+  const handleCreateBoard = ({ polygonId, point, equipment, slotCount }) => {
+    const environment = environments.find((e) => e.polygonId === polygonId)
+    if (!environment) return
+    const boardId = `board-${Date.now()}-${Math.round(Math.random() * 1000)}`
+    const newBoard = {
+      id: boardId,
+      catalogItemId: equipment.catalogItemId ?? equipment.id,
+      polygonId,
+      point,
+      label: equipment.label,
+      iconSrc: equipment.iconSrc,
+      iconKey: equipment.iconKey ?? 'quadros',
+      filterKeys: equipment.filterKeys ?? [],
+      environmentId: environment.id,
+      slotCount,
+      pinned: false,
+      slots: Array(slotCount).fill(null),
+    }
+    setAutomationBoards((curr) => [...curr, newBoard])
+    setProjectTree((curr) =>
+      appendEquipmentToEnvironment(curr, environment.id, {
+        id: boardId,
+        label: equipment.label,
+        icon: equipment.iconKey ?? 'quadros',
+        iconSrc: equipment.iconSrc,
+        source: 'automation-board',
+        children: [],
+        expanded: true,
+      }),
+    )
+  }
+
+  const handleBoardPinToggle = (boardId) => {
+    setAutomationBoards((curr) =>
+      curr.map((b) => (b.id === boardId ? { ...b, pinned: !b.pinned } : b)),
+    )
+  }
+
+  const handleBoardSlotInstall = ({ boardId, slotIndex, device }) => {
+    setAutomationBoards((curr) =>
+      curr.map((b) => {
+        if (b.id !== boardId) return b
+        const slots = [...b.slots]
+        slots[slotIndex] = device
+        return { ...b, slots }
+      }),
+    )
+    setProjectTree((curr) =>
+      appendEquipmentToEnvironment(curr, boardId, {
+        id: device.id,
+        label: device.label,
+        icon: device.iconKey ?? 'drivers',
+        iconSrc: device.iconSrc,
+        source: 'board-device',
+      }),
+    )
+  }
+
+  const handleBoardSlotRemove = ({ boardId, slotIndex }) => {
+    const board = automationBoards.find((b) => b.id === boardId)
+    const deviceId = board?.slots[slotIndex]?.id ?? null
+    setAutomationBoards((curr) =>
+      curr.map((b) => {
+        if (b.id !== boardId) return b
+        const slots = [...b.slots]
+        slots[slotIndex] = null
+        return { ...b, slots }
+      }),
+    )
+    if (deviceId) {
+      setProjectTree((curr) => removeNodeById(curr, deviceId))
+    }
+  }
+
+  const handleDeleteBoard = (boardId) => {
+    setAutomationBoards((curr) => curr.filter((b) => b.id !== boardId))
+    setProjectTree((curr) => removeNodeById(curr, boardId))
+  }
+
+  const handleBoardMoved = ({ boardId, point, polygonId }) => {
+    const nextEnvironment = environments.find((e) => e.polygonId === polygonId)
+    if (!nextEnvironment) return
+    const board = automationBoards.find((b) => b.id === boardId)
+    if (!board) return
+    const prevEnvironmentId = board.environmentId
+    setAutomationBoards((curr) =>
+      curr.map((b) => (b.id === boardId ? { ...b, point, polygonId, environmentId: nextEnvironment.id } : b)),
+    )
+    if (prevEnvironmentId !== nextEnvironment.id) {
+      setProjectTree((curr) => {
+        const boardNode = findNodeById(curr, boardId)
+        if (!boardNode) return curr
+        return appendEquipmentToEnvironment(removeNodeById(curr, boardId), nextEnvironment.id, boardNode)
+      })
+    }
+  }
+
+  const handleBoardRenameRequest = (boardId) => {
+    setRenamingBoardId(boardId)
+    setRenamingBoardSource('canvas')
+  }
+
+  const handleBoardLabelDoubleClick = (boardId) => {
+    setRenamingBoardId(boardId)
+    setRenamingBoardSource('canvas')
+  }
+
+  const handleCommitBoardLabelRename = (boardId, newName) => {
+    const trimmed = (newName ?? '').trim()
+    if (trimmed) {
+      setAutomationBoards((curr) => curr.map((b) => (b.id === boardId ? { ...b, label: trimmed } : b)))
+      setProjectTree((curr) => updateNodeLabel(curr, boardId, trimmed))
+    }
+    setRenamingBoardId(null)
+    setRenamingBoardSource(null)
+  }
+
   const handleEquipmentDropped = ({ polygonId, point, equipment }) => {
+    const catalogItemId = equipment.catalogItemId ?? equipment.id
+
+    if (isBoardOnlyItem(catalogItemId)) {
+      return
+    }
+
+    if (BOARD_CATALOG_IDS.has(catalogItemId)) {
+      const slotCount = getBoardSlotCount(catalogItemId)
+      if (slotCount === null) {
+        const env = environments.find((e) => e.polygonId === polygonId)
+        if (env) setPendingBoardPlacement({ polygonId, point, equipment })
+        return
+      }
+      handleCreateBoard({ polygonId, point, equipment, slotCount })
+      return
+    }
+
     const environment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
 
     if (!environment || !equipment?.label || !equipment?.iconSrc) {
@@ -629,6 +785,20 @@ function App() {
       return
     }
 
+    if (node?.source === 'automation-board') {
+      handleDeleteBoard(node.id)
+      return
+    }
+
+    if (node?.source === 'board-device') {
+      const board = automationBoards.find((b) => b.slots.some((s) => s?.id === node.id))
+      if (board) {
+        const slotIndex = board.slots.findIndex((s) => s?.id === node.id)
+        handleBoardSlotRemove({ boardId: board.id, slotIndex })
+      }
+      return
+    }
+
     if (node?.source !== 'created-environment') {
       return
     }
@@ -695,13 +865,24 @@ function App() {
   const handleSelectEnvironment = (environmentId) => {
     setSelectedEnvironmentId(environmentId)
     setSelectedEquipmentId(null)
+    setSelectedBoardId(null)
   }
 
   const handleSelectEquipment = (equipmentId) => {
     setSelectedEquipmentId(equipmentId)
+    setSelectedBoardId(null)
     const equipment = placedEquipments.find((currentEquipment) => currentEquipment.id === equipmentId)
     if (equipment?.environmentId) {
       setSelectedEnvironmentId(equipment.environmentId)
+    }
+  }
+
+  const handleSelectBoard = (boardId) => {
+    setSelectedBoardId(boardId)
+    setSelectedEquipmentId(null)
+    const board = automationBoards.find((b) => b.id === boardId)
+    if (board?.environmentId) {
+      setSelectedEnvironmentId(board.environmentId)
     }
   }
 
@@ -750,6 +931,8 @@ function App() {
     setRenamingSource(null)
     setRenamingEquipmentId(null)
     setRenamingEquipmentSource(null)
+    setRenamingBoardId(null)
+    setRenamingBoardSource(null)
     setRenamingGenericNodeId(null)
   }
 
@@ -761,6 +944,11 @@ function App() {
 
     if (node?.source === 'equipment-item') {
       handleSelectEquipment(node.id)
+      return
+    }
+
+    if (node?.source === 'automation-board') {
+      handleSelectBoard(node.id)
     }
   }
 
@@ -775,7 +963,7 @@ function App() {
       return
     }
 
-    if (node?.source === 'project' || node?.source === 'pavimento') {
+    if (node?.source === 'automation-board' || node?.source === 'project' || node?.source === 'pavimento') {
       setRenamingGenericNodeId(node.id)
     }
   }
@@ -788,6 +976,16 @@ function App() {
 
     if (placedEquipments.some((equipment) => equipment.id === nodeId)) {
       handleCommitEquipmentRename(nodeId, newName)
+      return
+    }
+
+    if (automationBoards.some((b) => b.id === nodeId)) {
+      const trimmed = (newName ?? '').trim()
+      if (trimmed) {
+        setAutomationBoards((curr) => curr.map((b) => (b.id === nodeId ? { ...b, label: trimmed } : b)))
+        setProjectTree((curr) => updateNodeLabel(curr, nodeId, trimmed))
+      }
+      setRenamingGenericNodeId(null)
       return
     }
 
@@ -945,9 +1143,10 @@ function App() {
   const renamingEquipmentNodeId = renamingEquipmentSource === 'tree' ? renamingEquipmentId : null
   const renamingNodeId = renamingGenericNodeId ?? (renamingSource === 'tree' ? renamingEnvironmentId : renamingEquipmentNodeId)
   const renamingEquipmentCanvasId = renamingEquipmentSource === 'canvas' ? renamingEquipmentId : null
+  const renamingBoardCanvasId = renamingBoardSource === 'canvas' ? renamingBoardId : null
   const selectedEnvironment = environments.find((environment) => environment.id === selectedEnvironmentId)
   const selectedPolygonId = selectedEnvironment?.polygonId ?? null
-  const selectedNodeId = selectedEquipmentId ?? selectedEnvironmentId
+  const selectedNodeId = selectedBoardId ?? selectedEquipmentId ?? selectedEnvironmentId
   const equipmentPropertiesEquipment = placedEquipments.find((equipment) => equipment.id === equipmentPropertiesId) ?? null
   const equipmentPropertiesEnvironment = environments.find(
     (environment) => environment.id === equipmentPropertiesEquipment?.environmentId,
@@ -1104,6 +1303,18 @@ function App() {
                 onMultiAddPlacementCommit={handleMultiAddPlacementCommit}
                 onMultiAddPlacementCancel={() => setMultiAddPlacementRequest(null)}
                 onPolygonTranslated={handlePolygonTranslated}
+                automationBoards={automationBoards}
+                selectedBoardId={selectedBoardId}
+                renamingBoardId={renamingBoardCanvasId}
+                onBoardSelect={handleSelectBoard}
+                onBoardPinToggle={handleBoardPinToggle}
+                onBoardSlotInstall={handleBoardSlotInstall}
+                onBoardSlotRemove={handleBoardSlotRemove}
+                onBoardMove={handleBoardMoved}
+                onBoardRename={handleBoardRenameRequest}
+                onBoardDelete={handleDeleteBoard}
+                onBoardLabelDoubleClick={handleBoardLabelDoubleClick}
+                onBoardLabelRenameCommit={handleCommitBoardLabelRename}
                 onEquipmentDelete={handleDeleteEquipment}
                 selectedEquipmentId={selectedEquipmentId}
                 renamingEquipmentId={renamingEquipmentCanvasId}
@@ -1140,6 +1351,7 @@ function App() {
                 onCanvasBackgroundClick={() => {
                   setSelectedEnvironmentId(null)
                   setSelectedEquipmentId(null)
+                  setSelectedBoardId(null)
                 }}
                 onLabelClick={(polygonId) => {
                   const env = environments.find((e) => e.polygonId === polygonId)
@@ -1184,6 +1396,15 @@ function App() {
                 <EquipmentLibraryOverlay
                   onClose={() => setShowEquipmentLibrary(false)}
                   onStartMultiAddPlacement={handleStartMultiAddPlacement}
+                />
+              ) : null}
+              {pendingBoardPlacement ? (
+                <AutomationBoardOverlay
+                  onConfirm={({ slotCount }) => {
+                    handleCreateBoard({ ...pendingBoardPlacement, slotCount })
+                    setPendingBoardPlacement(null)
+                  }}
+                  onClose={() => setPendingBoardPlacement(null)}
                 />
               ) : null}
               {pendingDeletePolygonId ? (

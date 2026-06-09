@@ -66,7 +66,7 @@ A manipulação da árvore usa funções utilitárias recursivas dentro de `App.
 
 ### Wireframes técnicos
 
-Quando `zoom >= 500`, os equipamentos são renderizados com seu desenho técnico em escala real em vez do ícone. A lógica vive inteiramente em `CadCanvas.jsx` (no loop de renderização dos equipamentos) e no mapa `src/data/wireframes.js`.
+Quando `zoom >= 300`, os equipamentos são renderizados com seu desenho técnico em escala real em vez do ícone. A lógica vive inteiramente em `CadCanvas.jsx` (no loop de renderização dos equipamentos) e no mapa `src/data/wireframes.js`.
 
 **`src/data/wireframes.js`** — única fonte de verdade para wireframes:
 ```js
@@ -93,6 +93,54 @@ height = (heightMm / 1000) * scaleDefinition.pixelsPerMeter * zoomScale
 Se o equipamento não tiver entrada em `EQUIPMENT_WIREFRAMES`, ou se `scaleDefinition` ainda não estiver definida, o comportamento volta ao padrão (ícone + rótulo).
 
 O rótulo no modo wireframe é posicionado abaixo e centralizado; no modo ícone, fica à direita. A classe CSS modificadora `cad-equipment-placement--wireframe` (em `src/styles/cad.css`) controla essa diferença de layout.
+
+### Quadros de Automação
+
+Quadros de Automação são equipamentos Scenario especiais que possuem slots para instalação de módulos. Três tipos, definidos pelo `catalogItemId`:
+
+| catalogItemId | Label | Slots |
+|---|---|---|
+| `sce-quadros-1` | AC-QA6M | 6 (fixo) |
+| `sce-quadros-2` | AC-QA12M | 12 (fixo) |
+| `sce-quadros-3` | Quadro Custom | 1–20 (configurável via overlay) |
+
+**Estado dos boards** (em `automationBoards` no App.jsx):
+```js
+{ id, catalogItemId, polygonId, point, label, iconSrc, iconKey, filterKeys,
+  environmentId, slotCount, pinned: boolean,
+  slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
+```
+
+**Helpers** em `src/data/equipmentLibrary.js`:
+- `BOARD_CATALOG_IDS` — Set com os 3 IDs de catálogo de quadros
+- `isBoardOnlyItem(catalogItemId)` — true para itens que só existem em slots (sce-automation-*, sce-interfaces-*, sce-modulos-*, sce-entrada-*)
+- `getBoardSlotCount(catalogItemId)` — retorna 6, 12 ou null (Custom)
+
+**Fluxo de criação** (em App.jsx `handleEquipmentDropped`):
+1. Se `isBoardOnlyItem` → rejeitado (só aceito em slots de quadros)
+2. Se `BOARD_CATALOG_IDS`: AC-QA6M/AC-QA12M → `handleCreateBoard` imediato; Quadro Custom → abre `AutomationBoardOverlay` para escolha de slots
+
+**Renderização** em `CadCanvas.jsx`:
+- Estado **Padrão**: pin + ícone + rótulo
+- Estado **Hover / Pinado**: expande grade de slots (CSS `:hover` + classe `is-pinned`)
+- Slot vazio: drop target; slot ocupado: direito → menu "Remover dispositivo"
+- Pin: clique alterna `board.pinned`
+
+### Área de atuação dos sensores
+
+Sensores de movimento instalados no teto (AC-MOV-TETO, EB-SMT, EB-SMTv2) exibem sua área de detecção projetada no piso como um círculo recortado pelo polígono do ambiente.
+
+**IDs de catálogo com detecção:** `amb-acessorios-1`, `sce-sensores-1`, `sce-sensores-2` — definidos em `SENSOR_CATALOG_IDS` em `CadCanvas.jsx`.
+
+**Cálculo do raio** (em `CadCanvas.jsx`):
+```js
+// ângulo de abertura: 100° → metade = 50°
+radiusPixels = ceilingHeight × tan(50°) × scaleDefinition.pixelsPerMeter × zoomScale
+```
+
+Onde `ceilingHeight` vem de `polygonCeilingHeightById[equipment.polygonId]` (string numérica, parseada com `Number.parseFloat`).
+
+**Renderização:** Konva `Group` com `clipFunc` desenhando o polígono do ambiente → `Circle` dentro do grupo. A área visível é automaticamente a interseção círculo ∩ polígono. Estilo: fill `#F5D59D` a 0.25 de opacidade, stroke `#F5D59D` 4px. Só renderiza quando `scaleDefinition` está definida e o equipamento está visível pelos filtros ativos.
 
 ### Padrão de overlays
 

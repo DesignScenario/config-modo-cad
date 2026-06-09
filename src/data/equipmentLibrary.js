@@ -264,6 +264,16 @@ export const equipmentLibraryTabs = {
         { id: 'sce-sensores-2', label: 'EB-SMTv2', icon: 'sensores' },
       ],
     },
+    {
+      id: 'sce-quadros',
+      label: 'Quadros de Automação',
+      icon: 'pasta',
+      children: [
+        { id: 'sce-quadros-1', label: 'AC-QA6M', icon: 'quadros' },
+        { id: 'sce-quadros-2', label: 'AC-QA12M', icon: 'quadros' },
+        { id: 'sce-quadros-3', label: 'Quadro Custom', icon: 'quadros' },
+      ],
+    },
   ],
   Drivers: [
     {
@@ -429,6 +439,7 @@ function deriveSpecificFilterKeys(tabName, ancestorIds, itemId) {
     || pathIds.has('sce-interfaces')
     || pathIds.has('sce-modulos')
     || pathIds.has('sce-entrada')
+    || pathIds.has('sce-quadros')
   ) {
     filterKeys.add(EQUIPMENT_VISIBILITY_FILTER_KEYS.quadros)
   }
@@ -483,4 +494,22 @@ export const equipmentLibraryFilterMap = buildEquipmentFilterMap(equipmentLibrar
 
 export function getEquipmentFilterKeys(itemId) {
   return equipmentLibraryFilterMap[itemId]?.filterKeys ?? []
+}
+
+export const BOARD_CATALOG_IDS = new Set(['sce-quadros-1', 'sce-quadros-2', 'sce-quadros-3'])
+
+const BOARD_ONLY_PARENT_IDS = new Set(['sce-automation', 'sce-interfaces', 'sce-modulos', 'sce-entrada'])
+
+export function isBoardOnlyItem(catalogItemId) {
+  if (!catalogItemId) return false
+  const lastDash = catalogItemId.lastIndexOf('-')
+  if (lastDash === -1) return false
+  const parentId = catalogItemId.slice(0, lastDash)
+  return BOARD_ONLY_PARENT_IDS.has(parentId)
+}
+
+export function getBoardSlotCount(catalogItemId) {
+  if (catalogItemId === 'sce-quadros-1') return 6
+  if (catalogItemId === 'sce-quadros-2') return 12
+  return null
 }

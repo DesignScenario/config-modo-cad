@@ -71,11 +71,14 @@ function TreeNode({
   const isEquipmentItem = item.source === 'equipment-item'
   const isPavimento = item.source === 'pavimento'
   const isProject = item.source === 'project'
+  const isBoard = item.source === 'automation-board'
+  const isBoardDevice = item.source === 'board-device'
   const isRenaming = item.id === renamingNodeId
   const isSelected = item.id === selectedNodeId
   const handleRowClick = () => {
-    if (isEquipmentItem) {
+    if (isEquipmentItem || isBoard) {
       onSelectNode?.(item)
+      if (isBoard && hasChildren) onToggleItem(item.id)
       return
     }
 
@@ -127,12 +130,12 @@ function TreeNode({
           onDoubleClick={
             isEnvironment
               ? () => onFocusNode?.(item)
-              : isEquipmentItem
+              : (isEquipmentItem || isBoard || isBoardDevice)
                 ? () => onRenameRequest?.(item)
                 : undefined
           }
           onContextMenu={
-            (isEnvironment || isProject || isPavimento || isEquipmentItem)
+            (isEnvironment || isProject || isPavimento || isEquipmentItem || isBoard || isBoardDevice)
               ? (event) => {
                   event.preventDefault()
                   onOpenContextMenu?.(event, item)
@@ -281,7 +284,9 @@ function ProjectTree({
       ? 165
       : node.source === 'project'
         ? 140
-        : 92
+        : (node.source === 'automation-board' || node.source === 'board-device' || node.source === 'equipment-item')
+          ? 92
+          : 92
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
 
@@ -469,7 +474,7 @@ function ProjectTree({
                   <span className="cad-tree-context-menu__label">Gerar Room-Controls</span>
                 </button>
               </>
-            ) : contextMenu.node.source === 'equipment-item' ? (
+            ) : (contextMenu.node.source === 'equipment-item' || contextMenu.node.source === 'automation-board' || contextMenu.node.source === 'board-device') ? (
               <>
                 <button
                   type="button"

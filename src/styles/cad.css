@@ -2481,3 +2481,163 @@ body.is-dragging-overlay * {
   background: linear-gradient(180deg, #eeeeee 0%, #d9d9d9 100%);
   color: #323232;
 }
+
+/* ── Automation Boards ───────────────────────────────────── */
+
+.cad-board-placement {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 13px;
+  height: 13px;
+  border: 0;
+  background: transparent;
+  color: #1f1f1f;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  z-index: 7;
+}
+
+.cad-board-placement__icon {
+  width: 13px;
+  height: 13px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: block;
+}
+
+.cad-board-placement.is-selected {
+  color: #0d99ff;
+  font-weight: 600;
+}
+
+.cad-board-placement.is-selected .cad-board-placement__label {
+  color: #0d99ff;
+}
+
+.cad-board-placement__label {
+  position: absolute;
+  left: 17px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 11px;
+  line-height: 13px;
+  color: #1f1f1f;
+  pointer-events: auto;
+}
+
+/* ── Pin ─────────────────────────────────────────────────── */
+
+.cad-board-pin {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.cad-board-pin img {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+
+.cad-board-placement:hover .cad-board-pin,
+.cad-board-pin.is-pinned {
+  opacity: 1;
+}
+
+/* ── Structure ───────────────────────────────────────────── */
+
+.cad-board-structure {
+  position: absolute;
+  top: 150%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+
+  display: none;
+
+  padding: 4px;
+  gap: 4px;
+
+  background: #ebc697;
+  border: 1px solid #f0951e;
+  border-radius: 4px;
+
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+
+  grid-auto-flow: row;
+}
+
+.cad-board-placement:hover .cad-board-structure,
+.cad-board-structure.is-pinned {
+  display: grid;
+}
+
+/* ── Slots ───────────────────────────────────────────────── */
+
+.cad-board-slot {
+  width: 24px;
+  height: 24px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid #f0951e;
+  border-radius: 2px;
+
+  background: transparent;
+
+  cursor: default;
+
+  transition:
+    border-color 0.1s ease,
+    background-color 0.1s ease,
+    transform 0.1s ease;
+}
+
+.cad-board-slot.is-drag-over {
+  border-color: #039ed3;
+  background: #f0951e;
+}
+
+.cad-board-slot.is-occupied {
+  background: #f0951e;
+  border-color: #f0951e;
+  cursor: pointer;
+}
+
+.cad-board-slot__icon {
+  width: 18px;
+  height: 18px;
+
+  display: block;
+}
+
+.cad-board-slot__number {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 9px;
+  line-height: 1;
+
+  color: #000000;
+}

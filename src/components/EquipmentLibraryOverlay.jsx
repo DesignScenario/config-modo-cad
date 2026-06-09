@@ -26,6 +26,7 @@ import modulosWifi from '../assets/módulos-wifi.svg'
 import motores from '../assets/motores.svg'
 import pasta from '../assets/pasta.svg'
 import pulsadores from '../assets/pulsadores.svg'
+import quadros from '../assets/quadro.svg'
 import setaMenuSuspenso from '../assets/seta-menu-suspenso-16px.svg'
 import sensor from '../assets/sensor.svg'
 import sensores from '../assets/sensores.svg'
@@ -67,6 +68,7 @@ const ICON_MAP = {
   pulsadores,
   sensor,
   sensores,
+  quadros,
   tw10,
   tw4,
 }

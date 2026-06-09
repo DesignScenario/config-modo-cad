@@ -1,7 +1,10 @@
 import { Circle, Group, Layer, Line, Rect, Stage, Text, Image as KonvaImage } from 'react-konva'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import apagarProjeto from '../assets/apagar-projeto.svg'
+import pinPadrao from '../assets/pin-padrão.svg'
+import pinSelecionado from '../assets/pin-selecionado.svg'
 import { EQUIPMENT_WIREFRAMES } from '../data/wireframes'
+import { isBoardOnlyItem } from '../data/equipmentLibrary.js'
 
 const POLYGON_COLOR = '#6BC2F7'
 const RULER_COLOR = '#FC4242'
@@ -19,6 +22,9 @@ const EQUIPMENT_HOLD_TO_DRAG_MS = 180
 const MIN_ZOOM = 50
 const MAX_ZOOM = 1000
 const MULTI_ADD_PREVIEW_COLOR = '#0095ff'
+const SENSOR_CATALOG_IDS = new Set(['amb-acessorios-1', 'sce-sensores-1', 'sce-sensores-2'])
+const SENSOR_FILL_COLOR = '#F5D59D'
+const SENSOR_OPENING_ANGLE_HALF_RAD = (50 * Math.PI) / 180
 
 function hexToRgba(hexColor, alpha) {
   const sanitized = hexColor.replace('#', '')
@@ -605,16 +611,30 @@ function CadCanvas({
   onEquipmentLabelRenameCommit,
   onCancelRename,
   onPolygonTranslated,
+  automationBoards,
+  selectedBoardId,
+  renamingBoardId,
+  onBoardSelect,
+  onBoardPinToggle,
+  onBoardSlotInstall,
+  onBoardSlotRemove,
+  onBoardMove,
+  onBoardRename,
+  onBoardDelete,
+  onBoardLabelDoubleClick,
+  onBoardLabelRenameCommit,
 }) {
   const containerRef = useRef(null)
   const stageRef = useRef(null)
   const canvasRenameInputRef = useRef(null)
   const equipmentRenameInputRef = useRef(null)
+  const boardRenameInputRef = useRef(null)
   const equipmentHoldTimerRef = useRef(null)
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 })
   const lastFocusRequestTokenRef = useRef(null)
   const canvasRenameOpenedAtRef = useRef(0)
   const equipmentRenameOpenedAtRef = useRef(0)
+  const boardRenameOpenedAtRef = useRef(0)
   const size = useElementSize(containerRef)
   const zoomScale = useMemo(() => zoom / 100, [zoom])
   const backgroundImageOpacity = useMemo(() => {
@@ -636,8 +656,14 @@ function CadCanvas({
   const [multiAddDraft, setMultiAddDraft] = useState(null)
   const [polygonContextMenu, setPolygonContextMenu] = useState(null)
   const [equipmentContextMenu, setEquipmentContextMenu] = useState(null)
+  const [boardSlotContextMenu, setBoardSlotContextMenu] = useState(null)
+  const [boardContextMenu, setBoardContextMenu] = useState(null)
+  const [draggingBoard, setDraggingBoard] = useState(null)
+  const [dragOverBoardSlot, setDragOverBoardSlot] = useState(null)
+  const boardHoldTimerRef = useRef(null)
   const [polygonRenameDraft, setPolygonRenameDraft] = useState('')
   const [equipmentRenameDraft, setEquipmentRenameDraft] = useState('')
+  const [boardRenameDraft, setBoardRenameDraft] = useState('')
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [isMiddlePanning, setIsMiddlePanning] = useState(false)
   const loadedBackgroundImage = useLoadedImage(backgroundImage)
@@ -832,6 +858,21 @@ function CadCanvas({
     }
   }, [placedEquipments, renamingEquipmentId])
 
+  useEffect(() => {
+    if (!renamingBoardId) {
+      setBoardRenameDraft('')
+      return
+    }
+    boardRenameOpenedAtRef.current = Date.now()
+    const board = automationBoards?.find((b) => b.id === renamingBoardId)
+    setBoardRenameDraft(board?.label ?? '')
+    const input = boardRenameInputRef.current
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, [automationBoards, renamingBoardId])
+
   // Sync editing value when rename starts from outside (tree click).
   // Delete selected polygon on Delete/Backspace key (select tool only).
   useEffect(() => {
@@ -891,12 +932,15 @@ function CadCanvas({
     const handleCloseContextMenu = () => {
       setPolygonContextMenu(null)
       setEquipmentContextMenu(null)
+      setBoardSlotContextMenu(null)
+      setBoardContextMenu(null)
     }
 
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
         setPolygonContextMenu(null)
         setEquipmentContextMenu(null)
+        setBoardSlotContextMenu(null)
       }
     }
 
@@ -1006,6 +1050,42 @@ function CadCanvas({
       window.removeEventListener('pointerup', handlePointerUp)
     }
   }, [draggingEquipment, fittedBackgroundImage, onEquipmentMove, polygons])
+
+  useEffect(() => {
+    if (!draggingBoard) return undefined
+    const handlePointerMove = (event) => {
+      const containerRect = containerRef.current?.getBoundingClientRect()
+      if (!containerRect) return
+      const stagePoint = { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }
+      const targetPolygon = [...polygons].reverse().find((polygon) => {
+        const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
+        return isPointInsidePolygon(stagePoint, stagePoints)
+      })
+      setDraggingBoard((curr) => {
+        if (!curr) return null
+        return {
+          ...curr,
+          point: stageToNorm(stagePoint, fittedBackgroundImage),
+          polygonId: targetPolygon?.id ?? null,
+        }
+      })
+    }
+    const handlePointerUp = () => {
+      setDraggingBoard((curr) => {
+        if (curr?.polygonId) {
+          onBoardMove?.({ boardId: curr.id, point: curr.point, polygonId: curr.polygonId })
+        }
+        return null
+      })
+    }
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggingBoard, fittedBackgroundImage, onBoardMove, polygons])
+
   useEffect(() => {
     if (!draggingPolygon || !fittedBackgroundImage) {
       return undefined
@@ -1501,6 +1581,57 @@ function CadCanvas({
     }, EQUIPMENT_HOLD_TO_DRAG_MS)
   }
 
+  const handleBoardMouseDown = (event, board) => {
+    if (activeTool !== 'select') return
+    if (event.button !== 0) return
+    event.stopPropagation()
+    event.preventDefault()
+
+    if (selectedBoardId !== board.id) {
+      onBoardSelect?.(board.id)
+      return
+    }
+
+    if (event.detail >= 2) return
+
+    const container = containerRef.current
+    if (!container) return
+    const bounds = container.getBoundingClientRect()
+    const stagePoint = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+
+    if (boardHoldTimerRef.current) window.clearTimeout(boardHoldTimerRef.current)
+
+    boardHoldTimerRef.current = window.setTimeout(() => {
+      setDraggingBoard({
+        id: board.id,
+        point: stageToNorm(stagePoint, fittedBackgroundImage),
+        polygonId: board.polygonId,
+      })
+      boardHoldTimerRef.current = null
+    }, EQUIPMENT_HOLD_TO_DRAG_MS)
+  }
+
+  const openBoardContextMenu = (event, boardId) => {
+    if (activeTool !== 'select') return
+    const container = containerRef.current
+    if (!container) return
+    event.preventDefault()
+    event.stopPropagation()
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 172
+    const menuHeight = 60
+    const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
+    const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
+    setEquipmentContextMenu(null)
+    setPolygonContextMenu(null)
+    setBoardSlotContextMenu(null)
+    setBoardContextMenu({
+      boardId,
+      x: Math.max(4, x),
+      y: Math.max(4, y),
+    })
+  }
+
   const handleSelectedVertexDragMove = (event, polygonId, pointIndex) => {
     const draggedStagePoint = {
       x: event.target.x(),
@@ -1741,6 +1872,10 @@ function CadCanvas({
     () => Math.max(16, Math.ceil(measureLabelText(equipmentRenameDraft || ' ', 11)) + 10),
     [equipmentRenameDraft],
   )
+  const boardRenameInputWidth = useMemo(
+    () => Math.max(16, Math.ceil(measureLabelText(boardRenameDraft || ' ', 11)) + 10),
+    [boardRenameDraft],
+  )
   const polygonLabelPlacementById = useMemo(() => {
     const placements = {}
 
@@ -1835,6 +1970,47 @@ function CadCanvas({
                 </Group>
               )
             })}
+
+            {scaleDefinition ? (placedEquipments ?? [])
+              .filter((equipment) =>
+                SENSOR_CATALOG_IDS.has(equipment.catalogItemId) &&
+                isEquipmentIconVisible(equipment, equipmentFilters)
+              )
+              .map((equipment) => {
+                const polygon = polygons.find((p) => p.id === equipment.polygonId)
+                if (!polygon?.points?.length) return null
+                const ceilingHeight = Number.parseFloat(polygonCeilingHeightById?.[equipment.polygonId])
+                if (!Number.isFinite(ceilingHeight) || ceilingHeight <= 0) return null
+                const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+                const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+                const radiusPixels = ceilingHeight * Math.tan(SENSOR_OPENING_ANGLE_HALF_RAD) * stagePixelsPerMeter
+                const sensorStage = normToStage(equipment.point, fittedBackgroundImage)
+                const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+                return (
+                  <Group
+                    key={`sensor-area-${equipment.id}`}
+                    clipFunc={(ctx) => {
+                      ctx.beginPath()
+                      stagePoints.forEach(({ x, y }, i) => {
+                        if (i === 0) ctx.moveTo(x, y)
+                        else ctx.lineTo(x, y)
+                      })
+                      ctx.closePath()
+                    }}
+                    listening={false}
+                  >
+                    <Circle
+                      x={sensorStage.x}
+                      y={sensorStage.y}
+                      radius={radiusPixels}
+                      fill={hexToRgba(SENSOR_FILL_COLOR, 0.25)}
+                      stroke={SENSOR_FILL_COLOR}
+                      strokeWidth={4}
+                      listening={false}
+                    />
+                  </Group>
+                )
+              }) : null}
 
             {rectDraftStart && rectDraftCursor ? (() => {
               const a = normToStage(rectDraftStart, fittedBackgroundImage)
@@ -2089,12 +2265,16 @@ function CadCanvas({
         const pixelY = stagePoint.y
         const isSelected = selectedEquipmentId === equipment.id
 
-        const wireframeEntry = zoom >= 500 ? (EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null) : null
+        const wireframeEntry = zoom >= 300 ? (EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null) : null
         const showWireframe = wireframeEntry != null && scaleDefinition != null
-        const wireframeDims = showWireframe ? {
-          width: (wireframeEntry.widthMm / 1000) * scaleDefinition.pixelsPerMeter * zoomScale,
-          height: (wireframeEntry.heightMm / 1000) * scaleDefinition.pixelsPerMeter * zoomScale,
-        } : null
+        const wireframeDims = showWireframe ? (() => {
+          const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+          const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+          return {
+            width: (wireframeEntry.widthMm / 1000) * stagePixelsPerMeter,
+            height: (wireframeEntry.heightMm / 1000) * stagePixelsPerMeter,
+          }
+        })() : null
 
         return (
           <div
@@ -2148,6 +2328,134 @@ function CadCanvas({
                 {equipment.label}
               </span>
             )}
+          </div>
+        )
+      })}
+
+      {(automationBoards ?? []).map((board) => {
+        if (!isEquipmentIconVisible(board, equipmentFilters)) return null
+        const visiblePoint = draggingBoard?.id === board.id ? draggingBoard.point : board.point
+        const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
+        const cols = board.slotCount <= 8 ? 2 : 3
+
+        return (
+          <div
+            key={board.id}
+            className={`cad-board-placement${selectedBoardId === board.id ? ' is-selected' : ''}`}
+            style={{ left: stagePoint.x, top: stagePoint.y }}
+            onMouseDown={(event) => handleBoardMouseDown(event, board)}
+            onContextMenu={(event) => openBoardContextMenu(event, board.id)}
+          >
+            <button
+              type="button"
+              className={`cad-board-pin${board.pinned ? ' is-pinned' : ''}`}
+              title={board.pinned ? 'Desafixar' : 'Fixar'}
+              onClick={(event) => { event.stopPropagation(); onBoardPinToggle?.(board.id) }}
+            >
+              <img src={board.pinned ? pinSelecionado : pinPadrao} alt="" draggable={false} />
+            </button>
+            <img src={board.iconSrc} alt="" className="cad-board-placement__icon" draggable={false} />
+            {renamingBoardId === board.id ? (
+              <input
+                ref={boardRenameInputRef}
+                className="cad-equipment-placement__input"
+                style={{ width: `${boardRenameInputWidth}px` }}
+                value={boardRenameDraft}
+                onChange={(event) => setBoardRenameDraft(event.currentTarget.value)}
+                onMouseDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    onBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
+                  } else if (event.key === 'Escape') {
+                    onBoardLabelRenameCommit?.(board.id, board.label)
+                  }
+                  event.stopPropagation()
+                }}
+                onBlur={(event) => {
+                  if (Date.now() - boardRenameOpenedAtRef.current < 120) return
+                  onBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
+                }}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+            ) : (
+              <span
+                className="cad-board-placement__label"
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  onBoardLabelDoubleClick?.(board.id)
+                }}
+              >
+                {board.label}
+              </span>
+            )}
+            <div
+              className={`cad-board-structure${board.pinned ? ' is-pinned' : ''}`}
+              style={{ gridTemplateColumns: `repeat(${cols}, 24px)` }}
+            >
+              {board.slots.map((slot, slotIndex) => {
+                const isOver = dragOverBoardSlot?.boardId === board.id && dragOverBoardSlot?.slotIndex === slotIndex
+                return (
+                  <div
+                    key={slotIndex}
+                    className={`cad-board-slot${slot ? ' is-occupied' : ''}${isOver ? ' is-drag-over' : ''}`}
+                    title={slot ? slot.label : `Slot ${slotIndex + 1}`}
+                    onDragOver={(event) => {
+                      if (slot) return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'copy'
+                      setDragOverBoardSlot({ boardId: board.id, slotIndex })
+                    }}
+                    onDragLeave={() => setDragOverBoardSlot(null)}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDragOverBoardSlot(null)
+                      if (slot) return
+                      try {
+                        const itemData = JSON.parse(event.dataTransfer.getData('application/x-equipment-item'))
+                        const catalogItemId = itemData?.catalogItemId ?? itemData?.id
+                        if (!itemData?.label || !isBoardOnlyItem(catalogItemId)) return
+                        onBoardSlotInstall?.({
+                          boardId: board.id,
+                          slotIndex,
+                          device: {
+                            id: `slot-${board.id}-${slotIndex}-${Date.now()}`,
+                            catalogItemId,
+                            label: itemData.label,
+                            iconSrc: itemData.iconSrc,
+                            iconKey: itemData.iconKey,
+                          },
+                        })
+                      } catch {}
+                    }}
+                    onContextMenu={(event) => {
+                      if (!slot) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      const container = containerRef.current
+                      const bounds = container?.getBoundingClientRect()
+                      const menuWidth = 172
+                      const menuHeight = 36
+                      const rawX = event.clientX - (bounds?.left ?? 0)
+                      const rawY = event.clientY - (bounds?.top ?? 0)
+                      setBoardSlotContextMenu({
+                        boardId: board.id,
+                        slotIndex,
+                        x: Math.max(4, Math.min(rawX, (bounds?.width ?? 400) - menuWidth - 4)),
+                        y: Math.max(4, Math.min(rawY, (bounds?.height ?? 400) - menuHeight - 4)),
+                      })
+                    }}
+                  >
+                    {slot ? (
+                      <img src={slot.iconSrc} alt={slot.label} className="cad-board-slot__icon" draggable={false} />
+                    ) : (
+                      <span className="cad-board-slot__number">{slotIndex + 1}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )
       })}
@@ -2314,6 +2622,25 @@ function CadCanvas({
         </div>
       ) : null}
 
+      {boardSlotContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${boardSlotContextMenu.x}px`, top: `${boardSlotContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onBoardSlotRemove?.({ boardId: boardSlotContextMenu.boardId, slotIndex: boardSlotContextMenu.slotIndex })
+              setBoardSlotContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Remover dispositivo</span>
+          </button>
+        </div>
+      ) : null}
+
       {equipmentContextMenu ? (
         <div
           className="cad-tree-context-menu"
@@ -2348,6 +2675,36 @@ function CadCanvas({
             onClick={() => {
               onEquipmentDelete?.(equipmentContextMenu.equipmentId)
               setEquipmentContextMenu(null)
+            }}
+          >
+            <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+            <span className="cad-tree-context-menu__label">Excluir</span>
+          </button>
+        </div>
+      ) : null}
+
+      {boardContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${boardContextMenu.x}px`, top: `${boardContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onBoardRename?.(boardContextMenu.boardId)
+              setBoardContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Renomear</span>
+          </button>
+          <button
+            type="button"
+            className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+            onClick={() => {
+              onBoardDelete?.(boardContextMenu.boardId)
+              setBoardContextMenu(null)
             }}
           >
             <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
