@@ -1455,6 +1455,10 @@ body.is-dragging-overlay * {
   text-transform: uppercase;
 }
 
+.cad-multi-overlay__title-bar--av {
+  background: #1d242c;
+}
+
 .cad-multi-overlay__body {
   padding: 16px 20px 20px;
   display: flex;

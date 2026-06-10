@@ -621,6 +621,7 @@ function CadCanvas({
   onBoardMove,
   onBoardRename,
   onBoardDelete,
+  onBoardEdit,
   onBoardLabelDoubleClick,
   onBoardLabelRenameCommit,
   avOrganizers,
@@ -633,6 +634,7 @@ function CadCanvas({
   onAvOrganizerMove,
   onAvOrganizerRename,
   onAvOrganizerDelete,
+  onAvOrganizerEdit,
   onAvOrganizerLabelDoubleClick,
   onAvOrganizerLabelRenameCommit,
 }) {
@@ -1724,9 +1726,10 @@ function CadCanvas({
     if (!container) return
     event.preventDefault()
     event.stopPropagation()
+    const isDynamic = (automationBoards ?? []).find((b) => b.id === boardId)?.slotCount === null
     const bounds = container.getBoundingClientRect()
     const menuWidth = 172
-    const menuHeight = 60
+    const menuHeight = isDynamic ? 90 : 60
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
     setEquipmentContextMenu(null)
@@ -1734,6 +1737,7 @@ function CadCanvas({
     setBoardSlotContextMenu(null)
     setBoardContextMenu({
       boardId,
+      isDynamic,
       x: Math.max(4, x),
       y: Math.max(4, y),
     })
@@ -1777,7 +1781,7 @@ function CadCanvas({
     event.stopPropagation()
     const bounds = container.getBoundingClientRect()
     const menuWidth = 172
-    const menuHeight = 60
+    const menuHeight = 90
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
     setEquipmentContextMenu(null)
@@ -2531,7 +2535,10 @@ function CadCanvas({
           return board.point
         })()
         const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
-        const cols = board.slotCount <= 8 ? 2 : 3
+        const isDynamic = board.slotCount === null
+        const cols = isDynamic
+          ? Math.min(board.slots.length, board.columnCount ?? 12)
+          : (board.columnCount ?? (board.slotCount <= 8 ? 2 : 3))
 
         return (
           <div
@@ -2646,6 +2653,8 @@ function CadCanvas({
                   >
                     {slot ? (
                       <img src={slot.iconSrc} alt={slot.label} className="cad-board-slot__icon" draggable={false} />
+                    ) : isDynamic ? (
+                      <span className="cad-board-slot__number">+</span>
                     ) : (
                       <span className="cad-board-slot__number">{slotIndex + 1}</span>
                     )}
@@ -2730,7 +2739,7 @@ function CadCanvas({
             )}
             <div
               className={`cad-av-organizer-structure${org.pinned ? ' is-pinned' : ''}`}
-              style={{ gridTemplateColumns: 'repeat(3, 24px)' }}
+              style={{ gridTemplateColumns: `repeat(${Math.min(org.slots.length, org.columnCount ?? 3)}, 24px)` }}
               onMouseDown={(event) => event.stopPropagation()}
             >
               {org.slots.map((slot, slotIndex) => {
@@ -2790,7 +2799,7 @@ function CadCanvas({
                     {slot ? (
                       <img src={slot.iconSrc} alt={slot.label} className="cad-av-organizer-slot__icon" draggable={false} />
                     ) : (
-                      <span className="cad-av-organizer-slot__number">{slotIndex + 1}</span>
+                      <span className="cad-av-organizer-slot__number">+</span>
                     )}
                   </div>
                 )
@@ -3039,6 +3048,18 @@ function CadCanvas({
           >
             <span className="cad-tree-context-menu__label">Renomear</span>
           </button>
+          {boardContextMenu.isDynamic ? (
+            <button
+              type="button"
+              className="cad-tree-context-menu__item"
+              onClick={() => {
+                onBoardEdit?.(boardContextMenu.boardId)
+                setBoardContextMenu(null)
+              }}
+            >
+              <span className="cad-tree-context-menu__label">Propriedades</span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
@@ -3087,6 +3108,16 @@ function CadCanvas({
             }}
           >
             <span className="cad-tree-context-menu__label">Renomear</span>
+          </button>
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onAvOrganizerEdit?.(avOrganizerContextMenu.organizerId)
+              setAvOrganizerContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Propriedades</span>
           </button>
           <button
             type="button"

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useDraggable } from '../hooks/useDraggable.js'
 
-function AutomationBoardOverlay({ onConfirm, onClose, initialColumns }) {
+function AvOrganizerOverlay({ onConfirm, onClose, initialColumns }) {
   const [columns, setColumns] = useState(initialColumns != null ? String(initialColumns) : '')
   const inputRef = useRef(null)
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
@@ -14,26 +14,26 @@ function AutomationBoardOverlay({ onConfirm, onClose, initialColumns }) {
   }
 
   return (
-    <div className="cad-multi-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Quadro Custom">
+    <div className="cad-multi-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Organizador AV">
       <section className="cad-multi-overlay" ref={panelRef} style={panelStyle}>
         <header className="cad-multi-overlay__header" onPointerDown={onHandlePointerDown}>
-          <span>Quadro Custom</span>
+          <span>Organizador AV</span>
           <button type="button" className="cad-multi-overlay__close" aria-label="Fechar" onClick={onClose}>
             ×
           </button>
         </header>
 
-        <div className="cad-multi-overlay__title-bar">
+        <div className="cad-multi-overlay__title-bar cad-multi-overlay__title-bar--av">
           QUANTIDADE DE COLUNAS
         </div>
 
         <div className="cad-multi-overlay__body">
           <div className="cad-multi-overlay__row">
-            <label className="cad-multi-overlay__label" htmlFor="board-cols-input">
+            <label className="cad-multi-overlay__label" htmlFor="av-org-cols-input">
               Colunas:
             </label>
             <input
-              id="board-cols-input"
+              id="av-org-cols-input"
               ref={inputRef}
               type="number"
               min="1"
@@ -64,4 +64,4 @@ function AutomationBoardOverlay({ onConfirm, onClose, initialColumns }) {
   )
 }
 
-export default AutomationBoardOverlay
+export default AvOrganizerOverlay

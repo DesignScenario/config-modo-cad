@@ -12,6 +12,7 @@ import DeleteEnvironmentConfirmOverlay from './components/DeleteEnvironmentConfi
 import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
 import EquipmentPropertiesOverlay from './components/EquipmentPropertiesOverlay.jsx'
 import AutomationBoardOverlay from './components/AutomationBoardOverlay.jsx'
+import AvOrganizerOverlay from './components/AvOrganizerOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
 import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, isBoardOnlyItem, getBoardSlotCount, AV_ORGANIZER_CATALOG_IDS, isAvOrganizerOnlyItem } from './data/equipmentLibrary.js'
@@ -227,6 +228,9 @@ function App() {
   const [multiAddPlacementRequest, setMultiAddPlacementRequest] = useState(null)
   const [automationBoards, setAutomationBoards] = useState([])
   const [pendingBoardPlacement, setPendingBoardPlacement] = useState(null)
+  const [pendingAvOrganizerPlacement, setPendingAvOrganizerPlacement] = useState(null)
+  const [editingBoardId, setEditingBoardId] = useState(null)
+  const [editingAvOrganizerId, setEditingAvOrganizerId] = useState(null)
   const [avOrganizers, setAvOrganizers] = useState([])
   const [selectedAvOrganizerId, setSelectedAvOrganizerId] = useState(null)
   const [renamingAvOrganizerId, setRenamingAvOrganizerId] = useState(null)
@@ -461,10 +465,11 @@ function App() {
     )
   }
 
-  const handleCreateBoard = ({ polygonId, point, equipment, slotCount }) => {
+  const handleCreateBoard = ({ polygonId, point, equipment, slotCount, columnCount }) => {
     const environment = environments.find((e) => e.polygonId === polygonId)
     if (!environment) return
     const boardId = `board-${Date.now()}-${Math.round(Math.random() * 1000)}`
+    const isDynamic = slotCount == null
     const newBoard = {
       id: boardId,
       catalogItemId: equipment.catalogItemId ?? equipment.id,
@@ -475,9 +480,10 @@ function App() {
       iconKey: equipment.iconKey ?? 'quadros',
       filterKeys: equipment.filterKeys ?? [],
       environmentId: environment.id,
-      slotCount,
+      slotCount: isDynamic ? null : slotCount,
+      columnCount: columnCount ?? null,
       pinned: false,
-      slots: Array(slotCount).fill(null),
+      slots: isDynamic ? [null] : Array(slotCount).fill(null),
     }
     setAutomationBoards((curr) => [...curr, newBoard])
     setProjectTree((curr) =>
@@ -505,6 +511,11 @@ function App() {
         if (b.id !== boardId) return b
         const slots = [...b.slots]
         slots[slotIndex] = device
+        if (b.slotCount === null) {
+          const occupiedCount = slots.filter(Boolean).length
+          const hasEmpty = slots.some((s) => s === null)
+          if (!hasEmpty && occupiedCount < 99) slots.push(null)
+        }
         return { ...b, slots }
       }),
     )
@@ -527,6 +538,11 @@ function App() {
         if (b.id !== boardId) return b
         const slots = [...b.slots]
         slots[slotIndex] = null
+        if (b.slotCount === null) {
+          while (slots.length > 1 && slots[slots.length - 1] === null && slots[slots.length - 2] === null) {
+            slots.pop()
+          }
+        }
         return { ...b, slots }
       }),
     )
@@ -538,6 +554,13 @@ function App() {
   const handleDeleteBoard = (boardId) => {
     setAutomationBoards((curr) => curr.filter((b) => b.id !== boardId))
     setProjectTree((curr) => removeNodeById(curr, boardId))
+  }
+
+  const handleBoardEditRequest = (boardId) => setEditingBoardId(boardId)
+
+  const handleBoardEditConfirm = (boardId, { columnCount }) => {
+    setAutomationBoards((curr) => curr.map((b) => (b.id === boardId ? { ...b, columnCount } : b)))
+    setEditingBoardId(null)
   }
 
   const handleBoardMoved = ({ boardId, point, polygonId }) => {
@@ -578,7 +601,7 @@ function App() {
     setRenamingBoardSource(null)
   }
 
-  const handleCreateAvOrganizer = ({ polygonId, point, equipment }) => {
+  const handleCreateAvOrganizer = ({ polygonId, point, equipment, columnCount }) => {
     const environment = environments.find((e) => e.polygonId === polygonId)
     if (!environment) return
     const id = `av-org-${Date.now()}-${Math.round(Math.random() * 1000)}`
@@ -592,9 +615,9 @@ function App() {
       iconKey: equipment.iconKey ?? 'quadros',
       filterKeys: equipment.filterKeys ?? [],
       environmentId: environment.id,
-      slotCount: 9,
+      columnCount: columnCount ?? 3,
       pinned: false,
-      slots: Array(9).fill(null),
+      slots: [null],
     }])
     setProjectTree((curr) =>
       appendEquipmentToEnvironment(curr, environment.id, {
@@ -614,6 +637,13 @@ function App() {
     setProjectTree((curr) => removeNodeById(curr, id))
   }
 
+  const handleAvOrganizerEditRequest = (id) => setEditingAvOrganizerId(id)
+
+  const handleAvOrganizerEditConfirm = (id, { columnCount }) => {
+    setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, columnCount } : o)))
+    setEditingAvOrganizerId(null)
+  }
+
   const handleAvOrganizerPinToggle = (id) => {
     setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, pinned: !o.pinned } : o)))
   }
@@ -624,6 +654,9 @@ function App() {
         if (o.id !== organizerId) return o
         const slots = [...o.slots]
         slots[slotIndex] = device
+        const occupiedCount = slots.filter(Boolean).length
+        const hasEmpty = slots.some((s) => s === null)
+        if (!hasEmpty && occupiedCount < 99) slots.push(null)
         return { ...o, slots }
       }),
     )
@@ -646,6 +679,9 @@ function App() {
         if (o.id !== organizerId) return o
         const slots = [...o.slots]
         slots[slotIndex] = null
+        while (slots.length > 1 && slots[slots.length - 1] === null && slots[slots.length - 2] === null) {
+          slots.pop()
+        }
         return { ...o, slots }
       }),
     )
@@ -708,7 +744,8 @@ function App() {
     }
 
     if (AV_ORGANIZER_CATALOG_IDS.has(catalogItemId)) {
-      handleCreateAvOrganizer({ polygonId, point, equipment })
+      const env = environments.find((e) => e.polygonId === polygonId)
+      if (env) setPendingAvOrganizerPlacement({ polygonId, point, equipment })
       return
     }
 
@@ -1500,6 +1537,7 @@ function App() {
                 onBoardMove={handleBoardMoved}
                 onBoardRename={handleBoardRenameRequest}
                 onBoardDelete={handleDeleteBoard}
+                onBoardEdit={handleBoardEditRequest}
                 onBoardLabelDoubleClick={handleBoardLabelDoubleClick}
                 onBoardLabelRenameCommit={handleCommitBoardLabelRename}
                 avOrganizers={avOrganizers}
@@ -1512,6 +1550,7 @@ function App() {
                 onAvOrganizerMove={handleAvOrganizerMoved}
                 onAvOrganizerRename={handleAvOrganizerRenameRequest}
                 onAvOrganizerDelete={handleDeleteAvOrganizer}
+                onAvOrganizerEdit={handleAvOrganizerEditRequest}
                 onAvOrganizerLabelDoubleClick={handleAvOrganizerLabelDoubleClick}
                 onAvOrganizerLabelRenameCommit={handleCommitAvOrganizerLabelRename}
                 onEquipmentDelete={handleDeleteEquipment}
@@ -1599,11 +1638,34 @@ function App() {
               ) : null}
               {pendingBoardPlacement ? (
                 <AutomationBoardOverlay
-                  onConfirm={({ slotCount }) => {
-                    handleCreateBoard({ ...pendingBoardPlacement, slotCount })
+                  onConfirm={({ columnCount }) => {
+                    handleCreateBoard({ ...pendingBoardPlacement, columnCount })
                     setPendingBoardPlacement(null)
                   }}
                   onClose={() => setPendingBoardPlacement(null)}
+                />
+              ) : null}
+              {pendingAvOrganizerPlacement ? (
+                <AvOrganizerOverlay
+                  onConfirm={({ columnCount }) => {
+                    handleCreateAvOrganizer({ ...pendingAvOrganizerPlacement, columnCount })
+                    setPendingAvOrganizerPlacement(null)
+                  }}
+                  onClose={() => setPendingAvOrganizerPlacement(null)}
+                />
+              ) : null}
+              {editingBoardId ? (
+                <AutomationBoardOverlay
+                  initialColumns={automationBoards.find((b) => b.id === editingBoardId)?.columnCount}
+                  onConfirm={({ columnCount }) => handleBoardEditConfirm(editingBoardId, { columnCount })}
+                  onClose={() => setEditingBoardId(null)}
+                />
+              ) : null}
+              {editingAvOrganizerId ? (
+                <AvOrganizerOverlay
+                  initialColumns={avOrganizers.find((o) => o.id === editingAvOrganizerId)?.columnCount}
+                  onConfirm={({ columnCount }) => handleAvOrganizerEditConfirm(editingAvOrganizerId, { columnCount })}
+                  onClose={() => setEditingAvOrganizerId(null)}
                 />
               ) : null}
               {pendingDeletePolygonId ? (
