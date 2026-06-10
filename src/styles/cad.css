@@ -51,8 +51,7 @@ button {
 }
 
 .cad-titlebar {
-  border-bottom: 1px solid #bdbdbd;
-  background: #f4f4f4;
+  background: #f3f3f3;
   color: #101010;
 }
 
@@ -61,7 +60,7 @@ button {
   align-items: center;
   gap: 7px;
   padding: 4px 8px 4px;
-  border-bottom: 1px solid #d0d0d0;
+  background: #f3f3f3;
 }
 
 .cad-titlebar__badge {
@@ -91,6 +90,7 @@ button {
   gap: 8px;
   min-height: 20px;
   padding: 0 4px;
+  background: #ffffff;
 }
 
 .cad-menubar__items {
@@ -138,6 +138,196 @@ button {
 
 .cad-window-button:hover {
   background: #e3e3e3;
+}
+
+.cad-taskbar {
+  display: flex;
+  align-items: stretch;
+  background: #f4f4f4;
+  border-bottom: 1px solid #d0d0d0;
+  height: 24px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.cad-taskbar.is-expanded {
+  height: 70px;
+}
+
+.cad-taskbar__items {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cad-taskbar__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  flex: 0 0 120px;
+  cursor: default;
+  width: 120px;
+  color: #1f1f1f;
+}
+
+
+.cad-taskbar__item:hover {
+  background: #ebebeb;
+}
+
+.cad-taskbar__item.is-active {
+  background: linear-gradient(
+    to bottom,
+  #F5AD7D 0%,
+  #F5D59D 100%
+  );
+  box-shadow:
+    inset 0 0 0 1px #D8973E,  /* stroke interno */
+    inset 0 -1px 0 0 #D8973E; /* destaque inferior */
+}
+
+.cad-taskbar__item-icon {
+  width: 32px;
+  height: 32px;
+  display: none;
+  flex-shrink: 0;
+}
+
+.cad-taskbar.is-expanded .cad-taskbar__item-icon {
+  display: block;
+}
+
+.cad-taskbar__item-label {
+  font-size: 11px;
+  line-height: 1.2;
+  color: #1f1f1f;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-width: 108px;
+  text-align: center;
+}
+
+.cad-taskbar.is-expanded .cad-taskbar__item {
+  justify-content: flex-start;
+  padding-top: 8px;
+}
+
+.cad-taskbar__mode-group {
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid #D9D9D9;
+  border-right: 1px solid #D9D9D9;
+}
+
+.cad-taskbar__side-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-left: 1px solid #d0d0d0;
+  flex-shrink: 0;
+}
+
+.cad-taskbar__label-toggle {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #5f5f5f;
+  background: transparent;
+  border: 1px solid #c8c8c8;
+  border-radius: 2px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.cad-taskbar__label-toggle:hover {
+  background: #e8e8e8;
+}
+
+.cad-taskbar__label-toggle.is-active {
+  background: var(--cad-accent);
+  border-color: rgba(105, 82, 10, 0.35);
+  color: #4a3100;
+  box-shadow: inset 0 0 0 1px rgba(105, 82, 10, 0.12);
+}
+
+.cad-taskbar__label-toggle.is-active:hover {
+  background: #edc96a;
+}
+
+.cad-toggle-rotulo {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 120px;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.cad-toggle-rotulo__label {
+  flex: 1 0 0;
+  font-size: 9px;
+  font-family: 'Segoe UI', sans-serif;
+  font-weight: 700;
+  color: #1f1f1f;
+  text-transform: uppercase;
+  text-align: right;
+  line-height: 1.3;
+  overflow: hidden;
+}
+
+.cad-toggle-rotulo.is-grande .cad-toggle-rotulo__label {
+  text-align: right;
+}
+
+.cad-toggle-rotulo__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.cad-toggle-rotulo__img {
+  display: block;
+}
+
+.cad-taskbar__expand-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  padding: 0;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.cad-taskbar__expand-btn:hover {
+  background: #e3e3e3;
+}
+
+.cad-taskbar__expand-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .cad-app-body {
@@ -1471,7 +1661,7 @@ body.is-dragging-overlay * {
   padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 
 .cad-environment-overlay__row {
@@ -1485,8 +1675,8 @@ body.is-dragging-overlay * {
 }
 
 .cad-environment-overlay__label {
-  width: 60px;
-  flex: 0 0 60px;
+  width: 64px;
+  flex: 0 0 64px;
   font-size: 12px;
   color: #131313;
 }
@@ -1641,141 +1831,115 @@ body.is-dragging-overlay * {
   box-shadow: 0 0 0 2px #49566a inset;
 }
 
-.cad-environment-overlay__body .cad-scale-overlay__start-btn {
+.cad-environment-overlay__submit-btn {
   align-self: center;
+  height: 25px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #323232;
+  background: linear-gradient(to bottom, #eeeeee 0%, #d9d9d9 100%);
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  cursor: default;
   margin-top: 4px;
 }
 
-/* -----------------------------------------------------------------------
-   Radio buttons (Novo ambiente / Associar ambiente)
------------------------------------------------------------------------ */
-
-.cad-environment-overlay__radio-group {
-  display: flex;
-  gap: 8px;
-  width: 100%;
+.cad-environment-overlay__submit-btn:hover:not(:disabled) {
+  background: linear-gradient(to bottom, #e8e8e8 0%, #d0d0d0 100%);
 }
 
-.cad-environment-overlay__radio-btn {
-  flex: 1 1 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 8px;
-  background: #f9f9f9;
-  border: 1px solid #c9cfd2;
-  border-radius: 4px;
-  box-shadow: 0 1px 1px rgba(201, 207, 210, 0.5);
-  font-size: 11px;
-  color: #000000;
-  cursor: pointer;
-  user-select: none;
-}
-
-.cad-environment-overlay__radio-btn:hover:not(:disabled) {
-  background: #f0f3f5;
-}
-
-.cad-environment-overlay__radio-btn.is-selected {
-  background: #E7E8EA;
-  border-color: #38404D;
-  box-shadow: 0 0 0 1px #38404D;
-}
-
-.cad-environment-overlay__radio-btn.is-disabled,
-.cad-environment-overlay__radio-btn:disabled {
+.cad-environment-overlay__submit-btn:disabled {
   opacity: 0.45;
-  cursor: not-allowed;
 }
 
-.cad-environment-overlay__radio-icon {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid #7a8899;
-  flex: 0 0 12px;
+/* Combo field (text input + dropdown arrow) */
+
+.cad-environment-overlay__combo {
   position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 27px;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #bababa;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
-.cad-environment-overlay__radio-btn.is-selected .cad-environment-overlay__radio-icon::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #38404D;
-  transform: translate(-50%, -50%);
+.cad-environment-overlay__combo-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  padding: 0 6px;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #202020;
+  box-shadow: none;
 }
 
-/* Library open button inside Name field */
-
-.cad-environment-overlay__input--with-lib-btn {
-  padding-right: 32px;
+.cad-environment-overlay__combo-input:focus {
+  outline: none;
 }
+
+.cad-environment-overlay__combo-input.is-readonly {
+  cursor: default;
+  color: #000000;
+}
+
+.cad-environment-overlay.is-drag-over {
+  outline: 2px solid #bababa;
+  outline-offset: 2px;
+}
+
+.cad-environment-overlay__combo-arrow {
+  flex-shrink: 0;
+  width: 25px;
+  border: none;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: default;
+  border-radius: 0 2px 2px 0;
+}
+
+.cad-environment-overlay__combo-arrow:hover {
+  background: #f0f0f0;
+}
+
+.cad-environment-overlay__arrow-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* Library button (standalone, outside the combo) */
 
 .cad-environment-overlay__lib-btn {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 28px;
+  flex-shrink: 0;
+  width: 27px;
   height: 27px;
   display: grid;
   place-items: center;
-  border: 0;
-  border-top-right-radius: 2px;
-  border-bottom-right-radius: 2px;
-  background: transparent;
-  cursor: pointer;
+  background: linear-gradient(to bottom, #eeeeee 0%, #d9d9d9 100%);
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  cursor: default;
   padding: 0;
 }
 
 .cad-environment-overlay__lib-btn:hover {
-  background: #e8edf5;
+  background: linear-gradient(to bottom, #e8e8e8 0%, #d0d0d0 100%);
 }
 
 .cad-environment-overlay__lib-btn-icon {
   width: 16px;
   height: 16px;
   display: block;
-}
-
-/* Associate combobox */
-
-.cad-environment-overlay__assoc-field {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 27px;
-  border: 1px solid #bababa;
-  border-radius: 2px;
-  background: #ffffff;
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
-  padding: 0 28px 0 8px;
-  font-size: 12px;
-  font-family: 'Segoe UI', sans-serif;
-  color: #202020;
-  cursor: pointer;
-  text-align: left;
-  position: relative;
-}
-
-.cad-environment-overlay__assoc-field .cad-environment-overlay__name-toggle-icon {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.cad-environment-overlay__assoc-value {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 
 /* -----------------------------------------------------------------------
@@ -2606,7 +2770,7 @@ body.is-dragging-overlay * {
   border: 1px solid #f0951e;
   border-radius: 2px;
 
-  background: transparent;
+  background: #e9d5ba;
 
   cursor: default;
 

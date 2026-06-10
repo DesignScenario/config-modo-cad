@@ -30,6 +30,7 @@ export const initialProject = {
           id: 'sala-de-automacao',
           label: 'Sala de Automação',
           icon: 'ambientes',
+          source: 'created-environment',
         },
       ],
     },

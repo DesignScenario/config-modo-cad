@@ -1052,6 +1052,17 @@ function CadCanvas({
   }, [draggingEquipment, fittedBackgroundImage, onEquipmentMove, polygons])
 
   useEffect(() => {
+    const cancelBoardHoldOnRelease = () => {
+      if (boardHoldTimerRef.current) {
+        window.clearTimeout(boardHoldTimerRef.current)
+        boardHoldTimerRef.current = null
+      }
+    }
+    window.addEventListener('pointerup', cancelBoardHoldOnRelease)
+    return () => window.removeEventListener('pointerup', cancelBoardHoldOnRelease)
+  }, [])
+
+  useEffect(() => {
     if (!draggingBoard) return undefined
     const handlePointerMove = (event) => {
       const containerRect = containerRef.current?.getBoundingClientRect()
@@ -1138,17 +1149,22 @@ function CadCanvas({
 
     const handlePointerUp = () => {
       if (draggingPolygon.stageDelta.x || draggingPolygon.stageDelta.y) {
+        const shiftPoint = (normPoint) => stageToNorm(
+          {
+            x: normToStage(normPoint, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
+            y: normToStage(normPoint, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+          },
+          fittedBackgroundImage,
+        )
         onPolygonTranslated?.({
           polygonId: draggingPolygon.polygonId,
           equipmentPoints: draggingPolygon.initialEquipmentPoints.map((equipment) => ({
             equipmentId: equipment.id,
-            point: stageToNorm(
-              {
-                x: normToStage(equipment.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
-                y: normToStage(equipment.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
-              },
-              fittedBackgroundImage,
-            ),
+            point: shiftPoint(equipment.point),
+          })),
+          boardPoints: (draggingPolygon.initialBoardPoints ?? []).map((board) => ({
+            boardId: board.id,
+            point: shiftPoint(board.point),
           })),
         })
       }
@@ -1500,6 +1516,9 @@ function CadCanvas({
           initialEquipmentPoints: (placedEquipments ?? [])
             .filter((equipment) => equipment.polygonId === polygonId)
             .map((equipment) => ({ id: equipment.id, point: equipment.point })),
+          initialBoardPoints: (automationBoards ?? [])
+            .filter((board) => board.polygonId === polygonId)
+            .map((board) => ({ id: board.id, point: board.point })),
         })
       }
     }
@@ -1984,7 +2003,13 @@ function CadCanvas({
                 const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
                 const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
                 const radiusPixels = ceilingHeight * Math.tan(SENSOR_OPENING_ANGLE_HALF_RAD) * stagePixelsPerMeter
-                const sensorStage = normToStage(equipment.point, fittedBackgroundImage)
+                const sensorBaseStage = normToStage(equipment.point, fittedBackgroundImage)
+                const sensorStage = draggingPolygon?.polygonId === equipment.polygonId
+                  ? {
+                      x: sensorBaseStage.x + (draggingPolygon.stageDelta?.x ?? 0),
+                      y: sensorBaseStage.y + (draggingPolygon.stageDelta?.y ?? 0),
+                    }
+                  : sensorBaseStage
                 const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
                 return (
                   <Group
@@ -2257,9 +2282,22 @@ function CadCanvas({
       })() : null}
 
       {(placedEquipments ?? []).filter((equipment) => isEquipmentIconVisible(equipment, equipmentFilters)).map((equipment) => {
-        const visiblePoint = draggingEquipment?.id === equipment.id
-          ? draggingEquipment.point
-          : equipment.point
+        const visiblePoint = (() => {
+          if (draggingEquipment?.id === equipment.id) return draggingEquipment.point
+          if (draggingPolygon?.polygonId === equipment.polygonId) {
+            const initial = draggingPolygon.initialEquipmentPoints?.find((e) => e.id === equipment.id)
+            if (initial) {
+              return stageToNorm(
+                {
+                  x: normToStage(initial.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
+                  y: normToStage(initial.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+                },
+                fittedBackgroundImage,
+              )
+            }
+          }
+          return equipment.point
+        })()
         const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
         const pixelX = stagePoint.x
         const pixelY = stagePoint.y
@@ -2334,7 +2372,22 @@ function CadCanvas({
 
       {(automationBoards ?? []).map((board) => {
         if (!isEquipmentIconVisible(board, equipmentFilters)) return null
-        const visiblePoint = draggingBoard?.id === board.id ? draggingBoard.point : board.point
+        const visiblePoint = (() => {
+          if (draggingBoard?.id === board.id) return draggingBoard.point
+          if (draggingPolygon?.polygonId === board.polygonId) {
+            const initial = draggingPolygon.initialBoardPoints?.find((b) => b.id === board.id)
+            if (initial) {
+              return stageToNorm(
+                {
+                  x: normToStage(initial.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
+                  y: normToStage(initial.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+                },
+                fittedBackgroundImage,
+              )
+            }
+          }
+          return board.point
+        })()
         const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
         const cols = board.slotCount <= 8 ? 2 : 3
 
@@ -2350,6 +2403,7 @@ function CadCanvas({
               type="button"
               className={`cad-board-pin${board.pinned ? ' is-pinned' : ''}`}
               title={board.pinned ? 'Desafixar' : 'Fixar'}
+              onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); onBoardPinToggle?.(board.id) }}
             >
               <img src={board.pinned ? pinSelecionado : pinPadrao} alt="" draggable={false} />
@@ -2392,6 +2446,7 @@ function CadCanvas({
             <div
               className={`cad-board-structure${board.pinned ? ' is-pinned' : ''}`}
               style={{ gridTemplateColumns: `repeat(${cols}, 24px)` }}
+              onMouseDown={(event) => event.stopPropagation()}
             >
               {board.slots.map((slot, slotIndex) => {
                 const isOver = dragOverBoardSlot?.boardId === board.id && dragOverBoardSlot?.slotIndex === slotIndex

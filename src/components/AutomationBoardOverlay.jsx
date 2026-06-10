@@ -8,7 +8,7 @@ function AutomationBoardOverlay({ onConfirm, onClose }) {
 
   const handleConfirm = () => {
     const parsed = Number.parseInt(quantity, 10)
-    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 20) {
+    if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 24) {
       onConfirm?.({ slotCount: parsed })
     }
   }
@@ -37,7 +37,7 @@ function AutomationBoardOverlay({ onConfirm, onClose }) {
               ref={inputRef}
               type="number"
               min="1"
-              max="20"
+              max="24"
               className="cad-multi-overlay__input"
               value={quantity}
               onChange={(event) => setQuantity(event.target.value)}

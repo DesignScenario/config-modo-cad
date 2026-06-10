@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import AppMenu from './components/AppMenu.jsx'
+import CadTaskbar from './components/CadTaskbar.jsx'
 import TopToolbar from './components/TopToolbar.jsx'
 import ProjectTree from './components/ProjectTree.jsx'
 import CadCanvas from './components/CadCanvas.jsx'
@@ -86,6 +87,12 @@ function updateNodeLabel(node, nodeId, newLabel) {
   if (node.id === nodeId) return { ...node, label: newLabel }
   if (!node.children?.length) return node
   return { ...node, children: node.children.map((child) => updateNodeLabel(child, nodeId, newLabel)) }
+}
+
+function updateNodeSource(node, nodeId, newSource) {
+  if (node.id === nodeId) return { ...node, source: newSource }
+  if (!node.children?.length) return node
+  return { ...node, children: node.children.map((child) => updateNodeSource(child, nodeId, newSource)) }
 }
 
 function appendEquipmentToEnvironment(node, environmentId, child) {
@@ -254,22 +261,10 @@ function App() {
   const importedImageUrlRef = useRef(null)
   const fileInputRef = useRef(null)
 
-  const menuItems = useMemo(
-    () => [
-      'Arquivo',
-      'Preferências',
-      'Sistema',
-      'Informações de projeto',
-      'Estrutura',
-      'CAD',
-      'Equipamentos',
-      'Programação',
-      'Instalação',
-      'Gerenciamento de Drivers',
-      'Enviar Projeto',
-    ],
-    [],
-  )
+  const menuItems = useMemo(() => ['Arquivo', 'Preferências', 'Sistema'], [])
+
+  const [taskbarExpanded, setTaskbarExpanded] = useState(false)
+  const [toggleEstado, setToggleEstado] = useState(false)
 
   useEffect(() => {
     const handlePointerMove = (event) => {
@@ -725,28 +720,34 @@ function App() {
     }
   }
 
-  const handlePolygonTranslated = ({ polygonId, equipmentPoints }) => {
-    if (!polygonId || !equipmentPoints?.length) {
-      return
+  const handlePolygonTranslated = ({ polygonId, equipmentPoints, boardPoints }) => {
+    if (!polygonId) return
+
+    if (equipmentPoints?.length) {
+      const translatedPointByEquipmentId = Object.fromEntries(
+        equipmentPoints.map(({ equipmentId, point }) => [equipmentId, point]),
+      )
+      setPlacedEquipments((currentEquipments) =>
+        currentEquipments.map((equipment) => {
+          const nextPoint = translatedPointByEquipmentId[equipment.id]
+          if (!nextPoint || equipment.polygonId !== polygonId) return equipment
+          return { ...equipment, point: nextPoint }
+        }),
+      )
     }
 
-    const translatedPointByEquipmentId = Object.fromEntries(
-      equipmentPoints.map(({ equipmentId, point }) => [equipmentId, point]),
-    )
-
-    setPlacedEquipments((currentEquipments) =>
-      currentEquipments.map((equipment) => {
-        const nextPoint = translatedPointByEquipmentId[equipment.id]
-        if (!nextPoint || equipment.polygonId !== polygonId) {
-          return equipment
-        }
-
-        return {
-          ...equipment,
-          point: nextPoint,
-        }
-      }),
-    )
+    if (boardPoints?.length) {
+      const translatedPointByBoardId = Object.fromEntries(
+        boardPoints.map(({ boardId, point }) => [boardId, point]),
+      )
+      setAutomationBoards((current) =>
+        current.map((board) => {
+          const nextPoint = translatedPointByBoardId[board.id]
+          if (!nextPoint || board.polygonId !== polygonId) return board
+          return { ...board, point: nextPoint }
+        }),
+      )
+    }
   }
 
   const handleDeleteEquipment = (equipmentId) => {
@@ -845,7 +846,7 @@ function App() {
   }
 
   const handleFocusNodeFromTree = (node) => {
-    if (node?.source !== 'created-environment') {
+    if (node?.source !== 'created-environment' && node?.icon !== 'ambientes') {
       return
     }
 
@@ -1053,6 +1054,7 @@ function App() {
         ...currentColors,
         [pendingEnvironmentPolygon.id]: color,
       }))
+      setProjectTree((curr) => updateNodeSource(curr, associateEnvId, 'created-environment'))
       setPendingEnvironmentPolygon(null)
       setEditingEnvironmentId(null)
       setShowEnvironmentOverlay(false)
@@ -1196,16 +1198,22 @@ function App() {
         onChange={handleFileChange}
       />
       <AppMenu
-        title="E2 - TELA - ESTRUTURA - PLANTA BAIXA"
+        title="Scenario Config Embrace"
         items={menuItems}
-        activeItem="CAD"
         userLabel="Login desigscenario1@gmail.com:design01@scenario.ind.br"
-        openItem={showEquipmentLibrary ? 'Equipamentos' : undefined}
-        onItemClick={(item) => {
-          if (item === 'Equipamentos') {
+      />
+
+      <CadTaskbar
+        activeItem={showEquipmentLibrary ? 'equipamentos' : 'cad'}
+        expanded={taskbarExpanded}
+        onToggleExpanded={() => setTaskbarExpanded((prev) => !prev)}
+        onItemClick={(id) => {
+          if (id === 'equipamentos') {
             setShowEquipmentLibrary((current) => !current)
           }
         }}
+        toggleEstado={toggleEstado}
+        onToggleEstado={() => setToggleEstado((prev) => !prev)}
       />
 
       <div
@@ -1388,8 +1396,7 @@ function App() {
                   defaultCeilingHeight={editingEnvironment?.ceilingHeight ?? defaultCeilingHeight}
                   initialClass={editingEnvironment?.environmentClass}
                   onConclude={handleConcludeEnvironment}
-                  unassociatedEnvironments={unassociatedEnvironments}
-                  allowAssociate={editingEnvironmentId == null}
+                  unassociatedEnvironments={editingEnvironmentId == null ? unassociatedEnvironments : []}
                 />
               ) : null}
               {showEquipmentLibrary ? (
@@ -1426,7 +1433,7 @@ function App() {
       </div>
 
       <StatusBar
-        version="2.15.5 Build(6)"
+        version={__APP_VERSION__}
         connectionStatus="Local"
         installationName="Nome do projeto"
       />

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDraggable } from '../hooks/useDraggable.js'
 import EnvironmentLibraryOverlay from './EnvironmentLibraryOverlay.jsx'
 import ambientesIcon from '../assets/ambientes.svg'
+import setaDropdownSvg from '../assets/e2/seta-dropdown.svg'
+
+const ENV_DRAG_TYPE = 'application/x-env-node'
 
 const PRESET_ENVIRONMENTS = [
   { name: 'Adega', type: 'Apoio' },
@@ -67,66 +70,44 @@ function EnvironmentInfoOverlay({
   initialClass,
   onConclude,
   unassociatedEnvironments = [],
-  allowAssociate = false,
 }) {
   const classes = useMemo(
     () => (classOptions?.length ? classOptions : ['Nao definida']),
     [classOptions],
   )
 
-  const [mode, setMode] = useState('novo') // 'novo' | 'associar'
   const [name, setName] = useState(suggestedName)
+  const [selectedAssocEnv, setSelectedAssocEnv] = useState(null)
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [environmentClass, setEnvironmentClass] = useState(initialClass || classes[0])
   const [ceilingHeight, setCeilingHeight] = useState(defaultCeilingHeight || '3')
   const [isLibraryOpen, setIsLibraryOpen] = useState(false)
-  const [selectedAssocEnv, setSelectedAssocEnv] = useState(null)
-  const [isAssocMenuOpen, setIsAssocMenuOpen] = useState(false)
-  const assocMenuRef = useRef(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const dropdownRef = useRef(null)
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
 
-  useEffect(() => {
-    setName(suggestedName)
-  }, [suggestedName])
-
-  useEffect(() => {
-    setEnvironmentClass(initialClass || classes[0])
-  }, [classes, initialClass])
-
-  useEffect(() => {
-    setCeilingHeight(defaultCeilingHeight || '3')
-  }, [defaultCeilingHeight])
-
-  // Reset mode when overlay opens with a different allowAssociate state
-  useEffect(() => {
-    if (!allowAssociate) {
-      setMode('novo')
-    }
-  }, [allowAssociate])
+  useEffect(() => { setName(suggestedName) }, [suggestedName])
+  useEffect(() => { setEnvironmentClass(initialClass || classes[0]) }, [classes, initialClass])
+  useEffect(() => { setCeilingHeight(defaultCeilingHeight || '3') }, [defaultCeilingHeight])
 
   useEffect(() => {
     const handlePointerDown = (event) => {
-      if (!assocMenuRef.current?.contains(event.target)) {
-        setIsAssocMenuOpen(false)
+      if (!dropdownRef.current?.contains(event.target)) {
+        setIsDropdownOpen(false)
       }
     }
-
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [])
 
-  const canSubmit =
-    mode === 'novo'
-      ? name.trim().length > 0
-      : selectedAssocEnv !== null
+  const canSubmit = name.trim().length > 0
 
   const handleSubmit = (event) => {
     event.preventDefault()
+    if (!canSubmit) return
 
-    if (!canSubmit) {
-      return
-    }
-
-    if (mode === 'associar' && selectedAssocEnv) {
+    if (selectedAssocEnv) {
       onConclude({
         associateEnvId: selectedAssocEnv.id,
         associateEnvName: selectedAssocEnv.label,
@@ -134,127 +115,133 @@ function EnvironmentInfoOverlay({
         ceilingHeight,
       })
     } else {
-      onConclude({
-        name: name.trim(),
-        environmentClass,
-        ceilingHeight,
-      })
+      onConclude({ name: name.trim(), environmentClass, ceilingHeight })
     }
+  }
+
+  const handleNameChange = (event) => {
+    setName(event.target.value)
+    setSelectedAssocEnv(null)
+  }
+
+  const handleDropdownSelect = (env) => {
+    if (env) {
+      setName(env.label)
+      setSelectedAssocEnv(env)
+    } else {
+      setName('')
+      setSelectedAssocEnv(null)
+    }
+    setIsDropdownOpen(false)
   }
 
   const handleLibrarySelect = (preset) => {
     setName(preset.name)
-    if (classes.includes(preset.type)) {
-      setEnvironmentClass(preset.type)
-    }
+    setSelectedAssocEnv(null)
+    if (classes.includes(preset.type)) setEnvironmentClass(preset.type)
     setIsLibraryOpen(false)
+  }
+
+  const handleDragOver = (event) => {
+    if (event.dataTransfer.types.includes(ENV_DRAG_TYPE)) {
+      event.preventDefault()
+      setIsDragOver(true)
+    }
+  }
+
+  const handleDragLeave = (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setIsDragOver(false)
+    }
+  }
+
+  const handleDrop = (event) => {
+    event.preventDefault()
+    setIsDragOver(false)
+    const raw = event.dataTransfer.getData(ENV_DRAG_TYPE)
+    if (!raw) return
+    const dragged = JSON.parse(raw)
+    const match = unassociatedEnvironments.find((e) => e.id === dragged.id)
+    if (match) {
+      setName(match.label)
+      setSelectedAssocEnv(match)
+      setIsDropdownOpen(false)
+    }
   }
 
   return (
     <div className="cad-environment-overlay-backdrop" role="dialog" aria-modal="true" aria-label="Informações do Ambiente">
-      <form className="cad-environment-overlay" ref={panelRef} style={panelStyle} onSubmit={handleSubmit}>
+      <form
+        className={`cad-environment-overlay${isDragOver ? ' is-drag-over' : ''}`}
+        ref={panelRef}
+        style={panelStyle}
+        onSubmit={handleSubmit}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <header className="cad-environment-overlay__header" onPointerDown={onHandlePointerDown}>
           Informações do Ambiente
         </header>
 
         <div className="cad-environment-overlay__body">
-          {/* Radio buttons */}
-          <div className="cad-environment-overlay__radio-group">
+          {/* Ambiente */}
+          <div className="cad-environment-overlay__row">
+            <span className="cad-environment-overlay__label">Ambiente:</span>
+            <div className="cad-environment-overlay__combo" ref={dropdownRef}>
+              <input
+                className={`cad-environment-overlay__combo-input${selectedAssocEnv ? ' is-readonly' : ''}`}
+                value={name}
+                onChange={handleNameChange}
+                readOnly={selectedAssocEnv !== null}
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                className="cad-environment-overlay__combo-arrow"
+                onClick={() => setIsDropdownOpen((open) => !open)}
+                aria-haspopup="listbox"
+                aria-expanded={isDropdownOpen}
+                tabIndex={-1}
+              >
+                <img src={setaDropdownSvg} alt="" className="cad-environment-overlay__arrow-icon" />
+              </button>
+
+              {isDropdownOpen && (
+                <div className="cad-environment-overlay__name-menu" role="listbox">
+                  <button
+                    type="button"
+                    className="cad-environment-overlay__name-option"
+                    onClick={() => handleDropdownSelect(null)}
+                  >
+                    &nbsp;
+                  </button>
+                  {unassociatedEnvironments.map((env) => (
+                    <button
+                      key={env.id}
+                      type="button"
+                      className="cad-environment-overlay__name-option"
+                      onClick={() => handleDropdownSelect(env)}
+                    >
+                      {env.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
               type="button"
-              className={`cad-environment-overlay__radio-btn${mode === 'novo' ? ' is-selected' : ''}`}
-              onClick={() => setMode('novo')}
+              className="cad-environment-overlay__lib-btn"
+              onClick={() => setIsLibraryOpen((open) => !open)}
+              aria-label="Abrir biblioteca de ambientes"
+              title="Biblioteca de Ambientes"
             >
-              <span className="cad-environment-overlay__radio-icon" aria-hidden="true" />
-              Novo ambiente
-            </button>
-            <button
-              type="button"
-              className={`cad-environment-overlay__radio-btn${mode === 'associar' ? ' is-selected' : ''}${!allowAssociate || unassociatedEnvironments.length === 0 ? ' is-disabled' : ''}`}
-              onClick={() => {
-                if (allowAssociate && unassociatedEnvironments.length > 0) {
-                  setMode('associar')
-                }
-              }}
-              disabled={!allowAssociate || unassociatedEnvironments.length === 0}
-              aria-disabled={!allowAssociate || unassociatedEnvironments.length === 0}
-            >
-              <span className="cad-environment-overlay__radio-icon" aria-hidden="true" />
-              Associar ambiente
+              <img src={ambientesIcon} alt="" className="cad-environment-overlay__lib-btn-icon" />
             </button>
           </div>
 
-          {/* Mode: Novo ambiente */}
-          {mode === 'novo' && (
-            <label className="cad-environment-overlay__row">
-              <span className="cad-environment-overlay__label">Nome:</span>
-              <div className="cad-environment-overlay__name-field">
-                <input
-                  className="cad-environment-overlay__input cad-environment-overlay__input--with-lib-btn"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="cad-environment-overlay__lib-btn"
-                  onClick={() => setIsLibraryOpen((open) => !open)}
-                  aria-label="Abrir biblioteca de ambientes"
-                  title="Biblioteca de Ambientes"
-                >
-                  <img
-                    src={ambientesIcon}
-                    alt=""
-                    className="cad-environment-overlay__lib-btn-icon"
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-            </label>
-          )}
-
-          {/* Mode: Associar ambiente */}
-          {mode === 'associar' && (
-            <label className="cad-environment-overlay__row">
-              <span className="cad-environment-overlay__label">Ambiente:</span>
-              <div className="cad-environment-overlay__name-field" ref={assocMenuRef}>
-                <button
-                  type="button"
-                  className="cad-environment-overlay__assoc-field"
-                  onClick={() => setIsAssocMenuOpen((open) => !open)}
-                  aria-haspopup="listbox"
-                  aria-expanded={isAssocMenuOpen}
-                >
-                  <span className="cad-environment-overlay__assoc-value">
-                    {selectedAssocEnv ? selectedAssocEnv.label : ''}
-                  </span>
-                  <span className="cad-environment-overlay__name-toggle-icon" aria-hidden="true" />
-                </button>
-
-                {isAssocMenuOpen && (
-                  <div
-                    className="cad-environment-overlay__name-menu"
-                    role="listbox"
-                    aria-label="Ambientes não associados"
-                  >
-                    {unassociatedEnvironments.map((env) => (
-                      <button
-                        key={env.id}
-                        type="button"
-                        className="cad-environment-overlay__name-option"
-                        onClick={() => {
-                          setSelectedAssocEnv(env)
-                          setIsAssocMenuOpen(false)
-                        }}
-                      >
-                        {env.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </label>
-          )}
-
+          {/* Função */}
           <label className="cad-environment-overlay__row">
             <span className="cad-environment-overlay__label">Função:</span>
             <div className="cad-environment-overlay__class-field">
@@ -264,17 +251,16 @@ function EnvironmentInfoOverlay({
                 onChange={(event) => setEnvironmentClass(event.target.value)}
               >
                 {classes.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
+                  <option key={option} value={option}>{option}</option>
                 ))}
               </select>
               <span className="cad-environment-overlay__class-indicator" aria-hidden="true">
-                <span className="cad-environment-overlay__name-toggle-icon" />
+                <img src={setaDropdownSvg} alt="" className="cad-environment-overlay__arrow-icon" />
               </span>
             </div>
           </label>
 
+          {/* Pé direito */}
           <label className="cad-environment-overlay__row">
             <span className="cad-environment-overlay__label">Pé direito:</span>
             <input
@@ -288,7 +274,7 @@ function EnvironmentInfoOverlay({
             />
           </label>
 
-          <button type="submit" className="cad-scale-overlay__start-btn" disabled={!canSubmit}>
+          <button type="submit" className="cad-environment-overlay__submit-btn" disabled={!canSubmit}>
             Concluir
           </button>
         </div>

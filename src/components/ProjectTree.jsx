@@ -67,7 +67,7 @@ function TreeNode({
   const expanded = expandedIds.has(item.id)
   const hasChildren = Boolean(item.children?.length)
   const isRoot = level === 0
-  const isEnvironment = item.source === 'created-environment'
+  const isEnvironment = item.source === 'created-environment' || item.icon === 'ambientes'
   const isEquipmentItem = item.source === 'equipment-item'
   const isPavimento = item.source === 'pavimento'
   const isProject = item.source === 'project'
@@ -127,6 +127,11 @@ function TreeNode({
           className={`cad-tree-row${isRoot ? ' cad-tree-row--root' : ''}${isSelected ? ' cad-tree-row--selected' : ''}`}
           style={{ '--tree-level': level }}
           onClick={handleRowClick}
+          draggable={isEnvironment}
+          onDragStart={isEnvironment ? (event) => {
+            event.dataTransfer.setData('application/x-env-node', JSON.stringify({ id: item.id, label: item.label }))
+            event.dataTransfer.effectAllowed = 'copy'
+          } : undefined}
           onDoubleClick={
             isEnvironment
               ? () => onFocusNode?.(item)

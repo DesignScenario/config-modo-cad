@@ -102,7 +102,7 @@ Quadros de Automação são equipamentos Scenario especiais que possuem slots pa
 |---|---|---|
 | `sce-quadros-1` | AC-QA6M | 6 (fixo) |
 | `sce-quadros-2` | AC-QA12M | 12 (fixo) |
-| `sce-quadros-3` | Quadro Custom | 1–20 (configurável via overlay) |
+| `sce-quadros-3` | Quadro Custom | 1–24 (configurável via overlay) |
 
 **Estado dos boards** (em `automationBoards` no App.jsx):
 ```js
