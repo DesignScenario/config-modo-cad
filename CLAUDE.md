@@ -89,7 +89,7 @@ A manipulação da árvore usa funções utilitárias recursivas dentro de `App.
 
 ### Wireframes técnicos
 
-Quando `zoom >= 300`, os equipamentos são renderizados com seu desenho técnico em escala real em vez do ícone. A lógica vive inteiramente em `CadCanvas.jsx` (no loop de renderização dos equipamentos) e no mapa `src/data/wireframes.js`.
+Quando `zoom >= 200`, os equipamentos são renderizados com seu desenho técnico em escala real em vez do ícone. A lógica vive inteiramente em `CadCanvas.jsx` (no loop de renderização dos equipamentos) e no mapa `src/data/wireframes.js`.
 
 **`src/data/wireframes.js`** — única fonte de verdade para wireframes:
 ```js

@@ -2445,7 +2445,7 @@ function CadCanvas({
         const pixelY = stagePoint.y
         const isSelected = selectedEquipmentId === equipment.id
 
-        const wireframeEntry = zoom >= 300 ? (EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null) : null
+        const wireframeEntry = zoom >= 200 ? (EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null) : null
         const showWireframe = wireframeEntry != null && scaleDefinition != null
         const wireframeDims = showWireframe ? (() => {
           const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
