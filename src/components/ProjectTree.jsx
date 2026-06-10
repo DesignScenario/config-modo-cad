@@ -73,12 +73,14 @@ function TreeNode({
   const isProject = item.source === 'project'
   const isBoard = item.source === 'automation-board'
   const isBoardDevice = item.source === 'board-device'
+  const isAvOrganizer = item.source === 'av-organizer'
+  const isAvDevice = item.source === 'av-device'
   const isRenaming = item.id === renamingNodeId
   const isSelected = item.id === selectedNodeId
   const handleRowClick = () => {
-    if (isEquipmentItem || isBoard) {
+    if (isEquipmentItem || isBoard || isAvOrganizer) {
       onSelectNode?.(item)
-      if (isBoard && hasChildren) onToggleItem(item.id)
+      if ((isBoard || isAvOrganizer) && hasChildren) onToggleItem(item.id)
       return
     }
 
@@ -135,12 +137,12 @@ function TreeNode({
           onDoubleClick={
             isEnvironment
               ? () => onFocusNode?.(item)
-              : (isEquipmentItem || isBoard || isBoardDevice)
+              : (isEquipmentItem || isBoard || isBoardDevice || isAvOrganizer || isAvDevice)
                 ? () => onRenameRequest?.(item)
                 : undefined
           }
           onContextMenu={
-            (isEnvironment || isProject || isPavimento || isEquipmentItem || isBoard || isBoardDevice)
+            (isEnvironment || isProject || isPavimento || isEquipmentItem || isBoard || isBoardDevice || isAvOrganizer || isAvDevice)
               ? (event) => {
                   event.preventDefault()
                   onOpenContextMenu?.(event, item)
@@ -479,7 +481,7 @@ function ProjectTree({
                   <span className="cad-tree-context-menu__label">Gerar Room-Controls</span>
                 </button>
               </>
-            ) : (contextMenu.node.source === 'equipment-item' || contextMenu.node.source === 'automation-board' || contextMenu.node.source === 'board-device') ? (
+            ) : (['equipment-item', 'automation-board', 'board-device', 'av-organizer', 'av-device'].includes(contextMenu.node.source)) ? (
               <>
                 <button
                   type="button"

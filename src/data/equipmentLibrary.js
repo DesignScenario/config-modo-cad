@@ -78,10 +78,10 @@ export const equipmentLibraryTabs = {
       label: 'Cortina',
       icon: 'pasta',
       children: [
-        { id: 'amb-cortina-1', label: 'Cortina/Toldo por relé (Controle por estado)', icon: 'motores' },
-        { id: 'amb-cortina-2', label: 'Cortina/Toldo por relé (Controle por pulso)', icon: 'motores' },
-        { id: 'amb-cortina-3', label: 'Cortina/Toldo Genérico (RF)', icon: 'motores' },
-        { id: 'amb-cortina-4', label: 'Cortina/Toldo Somfy RTS II (RF)', icon: 'motores' },
+        { id: 'amb-cortina-1', label: 'Cortina/Toldo por relé (Controle por estado)', icon: 'cortina' },
+        { id: 'amb-cortina-2', label: 'Cortina/Toldo por relé (Controle por pulso)', icon: 'cortina' },
+        { id: 'amb-cortina-3', label: 'Cortina/Toldo Genérico (RF)', icon: 'cortina' },
+        { id: 'amb-cortina-4', label: 'Cortina/Toldo Somfy RTS II (RF)', icon: 'cortina' },
       ],
     },
     {
@@ -276,6 +276,11 @@ export const equipmentLibraryTabs = {
     },
   ],
   Drivers: [
+    {
+      id: 'drv-av-organizer',
+      label: 'Organizador AV',
+      icon: 'drivers',
+    },
     {
       id: 'drv-cenarios',
       label: 'SCENARIO',
@@ -497,6 +502,27 @@ export function getEquipmentFilterKeys(itemId) {
 }
 
 export const BOARD_CATALOG_IDS = new Set(['sce-quadros-1', 'sce-quadros-2', 'sce-quadros-3'])
+
+export const AV_ORGANIZER_CATALOG_IDS = new Set(['drv-av-organizer'])
+
+function collectDriverLeafIds(nodes, result = new Set()) {
+  for (const node of nodes) {
+    if (AV_ORGANIZER_CATALOG_IDS.has(node.id)) continue
+    if (!node.children?.length) {
+      result.add(node.id)
+    } else {
+      collectDriverLeafIds(node.children, result)
+    }
+  }
+  return result
+}
+
+const DRIVER_LEAF_IDS = collectDriverLeafIds(equipmentLibraryTabs.Drivers)
+
+export function isAvOrganizerOnlyItem(catalogItemId) {
+  if (!catalogItemId) return false
+  return DRIVER_LEAF_IDS.has(catalogItemId)
+}
 
 const BOARD_ONLY_PARENT_IDS = new Set(['sce-automation', 'sce-interfaces', 'sce-modulos', 'sce-entrada'])
 

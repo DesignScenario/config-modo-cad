@@ -2725,6 +2725,7 @@ body.is-dragging-overlay * {
 }
 
 .cad-board-placement:hover .cad-board-pin,
+.cad-av-organizer-placement:hover .cad-board-pin,
 .cad-board-pin.is-pinned {
   opacity: 1;
 }
@@ -2804,4 +2805,112 @@ body.is-dragging-overlay * {
   line-height: 1;
 
   color: #000000;
+}
+
+/* ── Organizador AV ──────────────────────────────────────── */
+
+.cad-av-organizer-placement {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 13px;
+  height: 13px;
+  border: 0;
+  background: transparent;
+  color: #1f1f1f;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  z-index: 7;
+}
+
+.cad-av-organizer-placement__icon {
+  width: 13px;
+  height: 13px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: block;
+}
+
+.cad-av-organizer-placement.is-selected .cad-av-organizer-placement__label {
+  color: #0d99ff;
+}
+
+.cad-av-organizer-placement__label {
+  position: absolute;
+  left: 17px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 11px;
+  line-height: 13px;
+  color: #1f1f1f;
+  pointer-events: auto;
+}
+
+.cad-av-organizer-structure {
+  position: absolute;
+  top: 150%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: none;
+  padding: 4px;
+  gap: 4px;
+  background: #b3d4f5;
+  border: 1px solid #2980b9;
+  border-radius: 4px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  grid-auto-flow: row;
+}
+
+.cad-av-organizer-placement:hover .cad-av-organizer-structure,
+.cad-av-organizer-structure.is-pinned {
+  display: grid;
+}
+
+.cad-av-organizer-slot {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2980b9;
+  border-radius: 2px;
+  background: #d6eaf8;
+  cursor: default;
+  transition:
+    border-color 0.1s ease,
+    background-color 0.1s ease;
+}
+
+.cad-av-organizer-slot.is-drag-over {
+  border-color: #1a5276;
+  background: #5dade2;
+}
+
+.cad-av-organizer-slot.is-occupied {
+  background: #2980b9;
+  border-color: #1a5276;
+  cursor: pointer;
+}
+
+.cad-av-organizer-slot__icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.cad-av-organizer-slot__number {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 9px;
+  line-height: 1;
+  color: #1a3a50;
 }

@@ -4,7 +4,7 @@ import apagarProjeto from '../assets/apagar-projeto.svg'
 import pinPadrao from '../assets/pin-padrão.svg'
 import pinSelecionado from '../assets/pin-selecionado.svg'
 import { EQUIPMENT_WIREFRAMES } from '../data/wireframes'
-import { isBoardOnlyItem } from '../data/equipmentLibrary.js'
+import { isBoardOnlyItem, isAvOrganizerOnlyItem } from '../data/equipmentLibrary.js'
 
 const POLYGON_COLOR = '#6BC2F7'
 const RULER_COLOR = '#FC4242'
@@ -623,6 +623,18 @@ function CadCanvas({
   onBoardDelete,
   onBoardLabelDoubleClick,
   onBoardLabelRenameCommit,
+  avOrganizers,
+  selectedAvOrganizerId,
+  renamingAvOrganizerId,
+  onAvOrganizerSelect,
+  onAvOrganizerPinToggle,
+  onAvOrganizerSlotInstall,
+  onAvOrganizerSlotRemove,
+  onAvOrganizerMove,
+  onAvOrganizerRename,
+  onAvOrganizerDelete,
+  onAvOrganizerLabelDoubleClick,
+  onAvOrganizerLabelRenameCommit,
 }) {
   const containerRef = useRef(null)
   const stageRef = useRef(null)
@@ -661,6 +673,14 @@ function CadCanvas({
   const [draggingBoard, setDraggingBoard] = useState(null)
   const [dragOverBoardSlot, setDragOverBoardSlot] = useState(null)
   const boardHoldTimerRef = useRef(null)
+  const [avOrganizerSlotContextMenu, setAvOrganizerSlotContextMenu] = useState(null)
+  const [avOrganizerContextMenu, setAvOrganizerContextMenu] = useState(null)
+  const [draggingAvOrganizer, setDraggingAvOrganizer] = useState(null)
+  const [dragOverAvOrganizerSlot, setDragOverAvOrganizerSlot] = useState(null)
+  const avOrganizerHoldTimerRef = useRef(null)
+  const avOrganizerRenameInputRef = useRef(null)
+  const avOrganizerRenameOpenedAtRef = useRef(0)
+  const [avOrganizerRenameDraft, setAvOrganizerRenameDraft] = useState('')
   const [polygonRenameDraft, setPolygonRenameDraft] = useState('')
   const [equipmentRenameDraft, setEquipmentRenameDraft] = useState('')
   const [boardRenameDraft, setBoardRenameDraft] = useState('')
@@ -872,6 +892,21 @@ function CadCanvas({
       input.select()
     }
   }, [automationBoards, renamingBoardId])
+
+  useEffect(() => {
+    if (!renamingAvOrganizerId) {
+      setAvOrganizerRenameDraft('')
+      return
+    }
+    avOrganizerRenameOpenedAtRef.current = Date.now()
+    const org = avOrganizers?.find((o) => o.id === renamingAvOrganizerId)
+    setAvOrganizerRenameDraft(org?.label ?? '')
+    const input = avOrganizerRenameInputRef.current
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, [avOrganizers, renamingAvOrganizerId])
 
   // Sync editing value when rename starts from outside (tree click).
   // Delete selected polygon on Delete/Backspace key (select tool only).
@@ -1098,6 +1133,52 @@ function CadCanvas({
   }, [draggingBoard, fittedBackgroundImage, onBoardMove, polygons])
 
   useEffect(() => {
+    const cancel = () => {
+      if (avOrganizerHoldTimerRef.current) {
+        window.clearTimeout(avOrganizerHoldTimerRef.current)
+        avOrganizerHoldTimerRef.current = null
+      }
+    }
+    window.addEventListener('pointerup', cancel)
+    return () => window.removeEventListener('pointerup', cancel)
+  }, [])
+
+  useEffect(() => {
+    if (!draggingAvOrganizer) return undefined
+    const handlePointerMove = (event) => {
+      const containerRect = containerRef.current?.getBoundingClientRect()
+      if (!containerRect) return
+      const stagePoint = { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }
+      const targetPolygon = [...polygons].reverse().find((polygon) => {
+        const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
+        return isPointInsidePolygon(stagePoint, stagePoints)
+      })
+      setDraggingAvOrganizer((curr) => {
+        if (!curr) return null
+        return {
+          ...curr,
+          point: stageToNorm(stagePoint, fittedBackgroundImage),
+          polygonId: targetPolygon?.id ?? null,
+        }
+      })
+    }
+    const handlePointerUp = () => {
+      setDraggingAvOrganizer((curr) => {
+        if (curr?.polygonId) {
+          onAvOrganizerMove?.({ organizerId: curr.id, point: curr.point, polygonId: curr.polygonId })
+        }
+        return null
+      })
+    }
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggingAvOrganizer, fittedBackgroundImage, onAvOrganizerMove, polygons])
+
+  useEffect(() => {
     if (!draggingPolygon || !fittedBackgroundImage) {
       return undefined
     }
@@ -1165,6 +1246,10 @@ function CadCanvas({
           boardPoints: (draggingPolygon.initialBoardPoints ?? []).map((board) => ({
             boardId: board.id,
             point: shiftPoint(board.point),
+          })),
+          avOrganizerPoints: (draggingPolygon.initialAvOrganizerPoints ?? []).map((org) => ({
+            avOrganizerId: org.id,
+            point: shiftPoint(org.point),
           })),
         })
       }
@@ -1519,6 +1604,9 @@ function CadCanvas({
           initialBoardPoints: (automationBoards ?? [])
             .filter((board) => board.polygonId === polygonId)
             .map((board) => ({ id: board.id, point: board.point })),
+          initialAvOrganizerPoints: (avOrganizers ?? [])
+            .filter((org) => org.polygonId === polygonId)
+            .map((org) => ({ id: org.id, point: org.point })),
         })
       }
     }
@@ -1646,6 +1734,57 @@ function CadCanvas({
     setBoardSlotContextMenu(null)
     setBoardContextMenu({
       boardId,
+      x: Math.max(4, x),
+      y: Math.max(4, y),
+    })
+  }
+
+  const handleAvOrganizerMouseDown = (event, org) => {
+    if (activeTool !== 'select') return
+    if (event.button !== 0) return
+    event.stopPropagation()
+    event.preventDefault()
+
+    if (selectedAvOrganizerId !== org.id) {
+      onAvOrganizerSelect?.(org.id)
+      return
+    }
+
+    if (event.detail >= 2) return
+
+    const container = containerRef.current
+    if (!container) return
+    const bounds = container.getBoundingClientRect()
+    const stagePoint = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+
+    if (avOrganizerHoldTimerRef.current) window.clearTimeout(avOrganizerHoldTimerRef.current)
+
+    avOrganizerHoldTimerRef.current = window.setTimeout(() => {
+      setDraggingAvOrganizer({
+        id: org.id,
+        point: stageToNorm(stagePoint, fittedBackgroundImage),
+        polygonId: org.polygonId,
+      })
+      avOrganizerHoldTimerRef.current = null
+    }, EQUIPMENT_HOLD_TO_DRAG_MS)
+  }
+
+  const openAvOrganizerContextMenu = (event, organizerId) => {
+    if (activeTool !== 'select') return
+    const container = containerRef.current
+    if (!container) return
+    event.preventDefault()
+    event.stopPropagation()
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 172
+    const menuHeight = 60
+    const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
+    const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
+    setEquipmentContextMenu(null)
+    setPolygonContextMenu(null)
+    setAvOrganizerSlotContextMenu(null)
+    setAvOrganizerContextMenu({
+      organizerId,
       x: Math.max(4, x),
       y: Math.max(4, y),
     })
@@ -2003,7 +2142,10 @@ function CadCanvas({
                 const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
                 const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
                 const radiusPixels = ceilingHeight * Math.tan(SENSOR_OPENING_ANGLE_HALF_RAD) * stagePixelsPerMeter
-                const sensorBaseStage = normToStage(equipment.point, fittedBackgroundImage)
+                const sensorNormPoint = draggingEquipment?.id === equipment.id
+                  ? draggingEquipment.point
+                  : equipment.point
+                const sensorBaseStage = normToStage(sensorNormPoint, fittedBackgroundImage)
                 const sensorStage = draggingPolygon?.polygonId === equipment.polygonId
                   ? {
                       x: sensorBaseStage.x + (draggingPolygon.stageDelta?.x ?? 0),
@@ -2409,7 +2551,7 @@ function CadCanvas({
               <img src={board.pinned ? pinSelecionado : pinPadrao} alt="" draggable={false} />
             </button>
             <img src={board.iconSrc} alt="" className="cad-board-placement__icon" draggable={false} />
-            {renamingBoardId === board.id ? (
+            {equipmentFilters?.text === false ? null : renamingBoardId === board.id ? (
               <input
                 ref={boardRenameInputRef}
                 className="cad-equipment-placement__input"
@@ -2506,6 +2648,149 @@ function CadCanvas({
                       <img src={slot.iconSrc} alt={slot.label} className="cad-board-slot__icon" draggable={false} />
                     ) : (
                       <span className="cad-board-slot__number">{slotIndex + 1}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+
+      {(avOrganizers ?? []).map((org) => {
+        if (!isEquipmentIconVisible(org, equipmentFilters)) return null
+        const visiblePoint = (() => {
+          if (draggingAvOrganizer?.id === org.id) return draggingAvOrganizer.point
+          if (draggingPolygon?.polygonId === org.polygonId) {
+            const initial = draggingPolygon.initialAvOrganizerPoints?.find((o) => o.id === org.id)
+            if (initial) {
+              return stageToNorm(
+                {
+                  x: normToStage(initial.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
+                  y: normToStage(initial.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+                },
+                fittedBackgroundImage,
+              )
+            }
+          }
+          return org.point
+        })()
+        const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
+        return (
+          <div
+            key={org.id}
+            className={`cad-av-organizer-placement${selectedAvOrganizerId === org.id ? ' is-selected' : ''}`}
+            style={{ left: stagePoint.x, top: stagePoint.y }}
+            onMouseDown={(event) => handleAvOrganizerMouseDown(event, org)}
+            onContextMenu={(event) => openAvOrganizerContextMenu(event, org.id)}
+          >
+            <button
+              type="button"
+              className={`cad-board-pin${org.pinned ? ' is-pinned' : ''}`}
+              title={org.pinned ? 'Desafixar' : 'Fixar'}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); onAvOrganizerPinToggle?.(org.id) }}
+            >
+              <img src={org.pinned ? pinSelecionado : pinPadrao} alt="" draggable={false} />
+            </button>
+            <img src={org.iconSrc} alt="" className="cad-av-organizer-placement__icon" draggable={false} />
+            {equipmentFilters?.text === false ? null : renamingAvOrganizerId === org.id ? (
+              <input
+                ref={avOrganizerRenameInputRef}
+                className="cad-equipment-placement__input"
+                style={{ width: '90px' }}
+                value={avOrganizerRenameDraft}
+                onChange={(event) => setAvOrganizerRenameDraft(event.currentTarget.value)}
+                onMouseDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
+                  } else if (event.key === 'Escape') {
+                    onAvOrganizerLabelRenameCommit?.(org.id, org.label)
+                  }
+                  event.stopPropagation()
+                }}
+                onBlur={(event) => {
+                  if (Date.now() - avOrganizerRenameOpenedAtRef.current < 120) return
+                  onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
+                }}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+            ) : (
+              <span
+                className="cad-av-organizer-placement__label"
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  onAvOrganizerLabelDoubleClick?.(org.id)
+                }}
+              >
+                {org.label}
+              </span>
+            )}
+            <div
+              className={`cad-av-organizer-structure${org.pinned ? ' is-pinned' : ''}`}
+              style={{ gridTemplateColumns: 'repeat(3, 24px)' }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {org.slots.map((slot, slotIndex) => {
+                const isOver = dragOverAvOrganizerSlot?.organizerId === org.id && dragOverAvOrganizerSlot?.slotIndex === slotIndex
+                return (
+                  <div
+                    key={slotIndex}
+                    className={`cad-av-organizer-slot${slot ? ' is-occupied' : ''}${isOver ? ' is-drag-over' : ''}`}
+                    title={slot ? slot.label : `Slot ${slotIndex + 1}`}
+                    onDragOver={(event) => {
+                      if (slot) return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'copy'
+                      setDragOverAvOrganizerSlot({ organizerId: org.id, slotIndex })
+                    }}
+                    onDragLeave={() => setDragOverAvOrganizerSlot(null)}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDragOverAvOrganizerSlot(null)
+                      if (slot) return
+                      try {
+                        const itemData = JSON.parse(event.dataTransfer.getData('application/x-equipment-item'))
+                        const catalogItemId = itemData?.catalogItemId ?? itemData?.id
+                        if (!itemData?.label || !isAvOrganizerOnlyItem(catalogItemId)) return
+                        onAvOrganizerSlotInstall?.({
+                          organizerId: org.id,
+                          slotIndex,
+                          device: {
+                            id: `av-slot-${org.id}-${slotIndex}-${Date.now()}`,
+                            catalogItemId,
+                            label: itemData.label,
+                            iconSrc: itemData.iconSrc,
+                            iconKey: itemData.iconKey,
+                          },
+                        })
+                      } catch {}
+                    }}
+                    onContextMenu={(event) => {
+                      if (!slot) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      const container = containerRef.current
+                      const bounds = container?.getBoundingClientRect()
+                      const menuWidth = 172
+                      const menuHeight = 36
+                      const rawX = event.clientX - (bounds?.left ?? 0)
+                      const rawY = event.clientY - (bounds?.top ?? 0)
+                      setAvOrganizerSlotContextMenu({
+                        organizerId: org.id,
+                        slotIndex,
+                        x: Math.max(4, Math.min(rawX, (bounds?.width ?? 400) - menuWidth - 4)),
+                        y: Math.max(4, Math.min(rawY, (bounds?.height ?? 400) - menuHeight - 4)),
+                      })
+                    }}
+                  >
+                    {slot ? (
+                      <img src={slot.iconSrc} alt={slot.label} className="cad-av-organizer-slot__icon" draggable={false} />
+                    ) : (
+                      <span className="cad-av-organizer-slot__number">{slotIndex + 1}</span>
                     )}
                   </div>
                 )
@@ -2760,6 +3045,55 @@ function CadCanvas({
             onClick={() => {
               onBoardDelete?.(boardContextMenu.boardId)
               setBoardContextMenu(null)
+            }}
+          >
+            <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+            <span className="cad-tree-context-menu__label">Excluir</span>
+          </button>
+        </div>
+      ) : null}
+
+      {avOrganizerSlotContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${avOrganizerSlotContextMenu.x}px`, top: `${avOrganizerSlotContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onAvOrganizerSlotRemove?.({ organizerId: avOrganizerSlotContextMenu.organizerId, slotIndex: avOrganizerSlotContextMenu.slotIndex })
+              setAvOrganizerSlotContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Remover dispositivo</span>
+          </button>
+        </div>
+      ) : null}
+
+      {avOrganizerContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${avOrganizerContextMenu.x}px`, top: `${avOrganizerContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onAvOrganizerRename?.(avOrganizerContextMenu.organizerId)
+              setAvOrganizerContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Renomear</span>
+          </button>
+          <button
+            type="button"
+            className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+            onClick={() => {
+              onAvOrganizerDelete?.(avOrganizerContextMenu.organizerId)
+              setAvOrganizerContextMenu(null)
             }}
           >
             <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />

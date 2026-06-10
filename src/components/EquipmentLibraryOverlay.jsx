@@ -5,6 +5,7 @@ import circadiano from '../assets/circadiano.svg'
 import conexaoHardware from '../assets/conexão-hardware.svg'
 import conexaoSoftware from '../assets/conexão-software.svg'
 import controladoras from '../assets/controladoras.svg'
+import cortina from '../assets/cortina.svg'
 import drivers from '../assets/drivers.svg'
 import dvr from '../assets/dvr.svg'
 import entradaDigital from '../assets/entrada-digital.svg'
@@ -48,6 +49,7 @@ const ICON_MAP = {
   'conexao-hardware': conexaoHardware,
   'conexao-software': conexaoSoftware,
   controladoras,
+  cortina,
   dvr,
   drivers,
   'entrada-digital': entradaDigital,
