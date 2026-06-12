@@ -214,6 +214,8 @@ __APP_VERSION__ = `1.0.${git rev-list --count HEAD}`
 
 O valor é exibido no footer/statusbar como `1.0.X` onde `X` é o total de commits. `__APP_VERSION__` está declarado como global `readonly` no `eslint.config.js`.
 
+O número de versão incrementa **exclusivamente ao fazer um novo commit** — não por cada troca de mensagens no chat. O histórico de versões em `md/relatorio-modo-cad.md` deve registrar exatamente uma entrada por commit, com o número da versão correspondendo ao total de commits no momento do commit.
+
 ### Padrão de overlays
 
 Os overlays modais são componentes `<div>` posicionados renderizados condicionalmente. São arrastáveis via `src/hooks/useDraggable.js`. Cada overlay recebe callbacks `onConclude` / `onCancel`. O estado dos overlays é gerenciado em `App.jsx`.
