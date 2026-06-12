@@ -1,15 +1,16 @@
 import { useRef, useState } from 'react'
 import { useDraggable } from '../hooks/useDraggable.js'
 
-function AddMultipleItemsOverlay({ itemLabel, onConfirm, onClose }) {
+function AddMultipleItemsOverlay({ itemLabel, isLighting, onConfirm, onClose }) {
   const [quantity, setQuantity] = useState('')
+  const [sameCircuit, setSameCircuit] = useState(false)
   const inputRef = useRef(null)
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
 
   const handleConfirm = () => {
     const parsed = Number.parseInt(quantity, 10)
     if (!Number.isNaN(parsed) && parsed > 0) {
-      onConfirm?.({ quantity: parsed, itemLabel })
+      onConfirm?.({ quantity: parsed, itemLabel, sameCircuit: isLighting ? sameCircuit : false })
     }
   }
 
@@ -58,6 +59,25 @@ function AddMultipleItemsOverlay({ itemLabel, onConfirm, onClose }) {
               autoFocus
             />
           </div>
+
+          {isLighting ? (
+            // eslint-disable-next-line jsx-a11y/label-has-associated-control
+            <label className="cad-multi-overlay__circuit-row">
+              <span
+                className={`cad-multi-overlay__circuit-checkbox${sameCircuit ? ' is-checked' : ''}`}
+                aria-hidden="true"
+              >
+                {sameCircuit ? '✓' : ''}
+              </span>
+              <input
+                type="checkbox"
+                className="cad-multi-overlay__circuit-checkbox-input"
+                checked={sameCircuit}
+                onChange={(e) => setSameCircuit(e.target.checked)}
+              />
+              As luminárias farão parte do mesmo circuito
+            </label>
+          ) : null}
 
           <div className="cad-multi-overlay__actions">
             <button

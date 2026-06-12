@@ -505,6 +505,55 @@ export const BOARD_CATALOG_IDS = new Set(['sce-quadros-1', 'sce-quadros-2', 'sce
 
 export const AV_ORGANIZER_CATALOG_IDS = new Set(['drv-av-organizer'])
 
+export const LIGHTING_CATALOG_IDS = new Set(['amb-iluminacao-1', 'amb-iluminacao-2', 'amb-iluminacao-3'])
+
+export const WALL_SNAP_CATALOG_IDS = new Set([
+  'amb-pulsadores-virtue-1', 'amb-pulsadores-virtue-2', 'amb-pulsadores-virtue-3',
+  'amb-pulsadores-virtue-4', 'amb-pulsadores-virtue-5', 'amb-pulsadores-virtue-6', 'amb-pulsadores-virtue-7',
+  'amb-pulsadores-metal-1', 'amb-pulsadores-metal-2', 'amb-pulsadores-metal-3',
+  'amb-pulsadores-metal-4', 'amb-pulsadores-metal-5', 'amb-pulsadores-metal-6', 'amb-pulsadores-metal-7',
+  'amb-pulsadores-essence-1', 'amb-pulsadores-essence-2', 'amb-pulsadores-essence-3',
+  'sce-keypads-virtue-standard-1', 'sce-keypads-virtue-standard-2', 'sce-keypads-virtue-standard-3',
+  'sce-keypads-virtue-standard-4', 'sce-keypads-virtue-standard-5', 'sce-keypads-virtue-standard-6',
+  'sce-keypads-virtue-standard-7', 'sce-keypads-virtue-standard-8', 'sce-keypads-virtue-standard-9',
+  'sce-keypads-virtue-standard-10', 'sce-keypads-virtue-standard-11', 'sce-keypads-virtue-standard-12',
+  'sce-keypads-virtue-standard-13', 'sce-keypads-virtue-standard-14',
+  'sce-keypads-virtue-metal-1', 'sce-keypads-virtue-metal-2', 'sce-keypads-virtue-metal-3',
+  'sce-keypads-virtue-metal-4', 'sce-keypads-virtue-metal-5', 'sce-keypads-virtue-metal-6',
+  'sce-keypads-virtue-metal-7', 'sce-keypads-virtue-metal-8', 'sce-keypads-virtue-metal-9',
+  'sce-keypads-virtue-metal-10', 'sce-keypads-virtue-metal-11', 'sce-keypads-virtue-metal-12',
+  'sce-keypads-virtue-metal-13', 'sce-keypads-virtue-metal-14',
+  'sce-keypads-essence-1', 'sce-keypads-essence-2', 'sce-keypads-essence-3',
+  'sce-keypads-essence-4', 'sce-keypads-essence-5', 'sce-keypads-essence-6',
+  'sce-keypads-essence-7', 'sce-keypads-essence-8', 'sce-keypads-essence-9',
+  'sce-keypads-prestige-1', 'sce-keypads-prestige-2', 'sce-keypads-prestige-3',
+  'sce-keypads-prestige-4', 'sce-keypads-prestige-5', 'sce-keypads-prestige-6',
+  'sce-keypads-prestige-7', 'sce-keypads-prestige-8',
+])
+
+export const PIR_SENSOR_CATALOG_IDS = new Set([
+  'amb-pulsadores-virtue-4', 'amb-pulsadores-virtue-5', 'amb-pulsadores-virtue-6', 'amb-pulsadores-virtue-7',
+  'amb-pulsadores-metal-4', 'amb-pulsadores-metal-5', 'amb-pulsadores-metal-6', 'amb-pulsadores-metal-7',
+  'amb-pulsadores-essence-3',
+  'sce-keypads-virtue-standard-1', 'sce-keypads-virtue-standard-2',
+  'sce-keypads-virtue-standard-7', 'sce-keypads-virtue-standard-8', 'sce-keypads-virtue-standard-14',
+  'sce-keypads-virtue-metal-1', 'sce-keypads-virtue-metal-2',
+  'sce-keypads-virtue-metal-7', 'sce-keypads-virtue-metal-8', 'sce-keypads-virtue-metal-14',
+  'sce-keypads-essence-4', 'sce-keypads-essence-6',
+  'sce-keypads-prestige-6',
+])
+
+export const OC_SENSOR_CATALOG_IDS = new Set([
+  'sce-keypads-virtue-standard-9',
+  'sce-keypads-virtue-metal-9',
+  'sce-keypads-essence-5',
+  'sce-keypads-prestige-7',
+])
+
+export const CURTAIN_CATALOG_IDS = new Set([
+  'amb-cortina-1', 'amb-cortina-2', 'amb-cortina-3', 'amb-cortina-4',
+])
+
 function collectDriverLeafIds(nodes, result = new Set()) {
   for (const node of nodes) {
     if (AV_ORGANIZER_CATALOG_IDS.has(node.id)) continue

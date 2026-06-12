@@ -685,13 +685,13 @@ body.is-dragging-overlay * {
   top: 10px;
   left: 12px;
   z-index: 11;
-  color: #7d8490;
+  color: #f3f3f3;
   font-size: 13px;
   line-height: 1.2;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(29, 36, 40, 1);
   border-radius: 3px;
-  padding: 2px 6px;
+  padding: 4px 8px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
@@ -1507,6 +1507,39 @@ body.is-dragging-overlay * {
   border-color: #9a9a9a;
 }
 
+.cad-multi-overlay__circuit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #1f1f1f;
+  user-select: none;
+}
+
+.cad-multi-overlay__circuit-checkbox {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  background: #ececec;
+  color: #1a1a1a;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.cad-multi-overlay__circuit-checkbox-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .cad-multi-overlay__actions {
   display: flex;
   justify-content: flex-end;
@@ -1514,6 +1547,152 @@ body.is-dragging-overlay * {
 }
 
 
+
+/* OC Sensitivity Overlay */
+.cad-oc-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 20;
+  background: rgba(0,0,0,0.25);
+}
+.cad-oc-overlay {
+  background: #fff;
+  border: 1px solid #b3b3b3;
+  border-radius: 4px;
+  box-shadow: 0 4px 4px 3px rgba(0,0,0,0.25);
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Title bar */
+.cad-oc-overlay__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 29px;
+  padding: 6px 8px;
+  background: #f3f3f3;
+  cursor: grab;
+  user-select: none;
+}
+.cad-oc-overlay__titlebar-text {
+  font-size: 12px;
+  color: #000;
+}
+.cad-oc-overlay__titlebar-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  color: #444;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+/* Dark header */
+.cad-oc-overlay__dark-header {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 8px 16px;
+  background: #1d242c;
+  flex-shrink: 0;
+}
+.cad-oc-overlay__dark-header-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* Body */
+.cad-oc-overlay__body {
+  background: #f8f8f8;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.cad-oc-overlay__description {
+  font-size: 12px;
+  color: #000;
+  margin: 0;
+  line-height: 1.3;
+}
+/* Radio row */
+.cad-oc-overlay__radios {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cad-oc-overlay__radio-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.cad-oc-overlay__radio-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.cad-oc-overlay__radio-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid #888;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cad-oc-overlay__radio-icon.is-checked {
+  border-color: #444;
+  background: #fff;
+}
+.cad-oc-overlay__radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #444;
+  display: block;
+}
+.cad-oc-overlay__radio-label {
+  font-size: 12px;
+  color: #000;
+  white-space: nowrap;
+}
+/* Footer */
+.cad-oc-overlay__footer {
+  display: flex;
+  justify-content: center;
+}
+.cad-oc-overlay__btn-ok {
+  width: 70px;
+  height: 25px;
+  font-size: 12px;
+  color: #323232;
+  background: linear-gradient(to bottom, #eee, #d9d9d9);
+  border: 1px solid #b5b5b5;
+  border-radius: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cad-oc-overlay__btn-ok:hover {
+  background: linear-gradient(to bottom, #e0e0e0, #ccc);
+}
 
 .cad-environment-overlay-backdrop {
   position: absolute;
@@ -2917,4 +3096,93 @@ body.is-dragging-overlay * {
   font-size: 9px;
   line-height: 1;
   color: #1a3a50;
+}
+
+/* ── Cortinas ──────────────────────────────────────────────── */
+
+.cad-canvas-shell.is-curtain-draw {
+  cursor: crosshair;
+}
+
+.cad-curtain-placement {
+  position: absolute;
+  overflow: visible;
+  background: #f0f0f0;
+  border: 2px solid #888888;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  z-index: 7;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.cad-curtain-placement.is-selected {
+  border-color: #0d99ff;
+  box-shadow: 0 0 0 1px #0d99ff, 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.cad-curtain-icon-center {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  font-size: 11px;
+  line-height: 1;
+  color: #1f1f1f;
+}
+
+.cad-curtain-placement.is-selected .cad-curtain-icon-center {
+  color: #0d99ff;
+  font-weight: 600;
+}
+
+.cad-curtain-motor {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  background: #f8f8f8;
+  border: 1.5px solid #888888;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  transition: background 0.1s ease;
+  z-index: 8;
+}
+
+.cad-curtain-motor:hover {
+  background: #e0e0e0;
+}
+
+.cad-curtain-motor-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  opacity: 0.75;
+}
+
+.cad-curtain-placement.is-resizing {
+  cursor: default;
+}
+
+.cad-curtain-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 1.5px solid #0d99ff;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  z-index: 9;
+}
+
+.cad-curtain-resize-handle:hover {
+  background: #e0f0ff;
 }

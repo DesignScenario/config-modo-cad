@@ -13,15 +13,16 @@ import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
 import EquipmentPropertiesOverlay from './components/EquipmentPropertiesOverlay.jsx'
 import AutomationBoardOverlay from './components/AutomationBoardOverlay.jsx'
 import AvOrganizerOverlay from './components/AvOrganizerOverlay.jsx'
+import OcSensitivityOverlay from './components/OcSensitivityOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
-import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, isBoardOnlyItem, getBoardSlotCount, AV_ORGANIZER_CATALOG_IDS, isAvOrganizerOnlyItem } from './data/equipmentLibrary.js'
+import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, isBoardOnlyItem, getBoardSlotCount, AV_ORGANIZER_CATALOG_IDS, isAvOrganizerOnlyItem, LIGHTING_CATALOG_IDS, OC_SENSOR_CATALOG_IDS, CURTAIN_CATALOG_IDS } from './data/equipmentLibrary.js'
 import { initialProject } from './data/initialProject.js'
 import './styles/cad.css'
 
 const AUTOMATION_ROOM_ID = 'sala-de-automacao'
 const PROJECT_ROOT_ID = 'novo-projeto'
-const MIN_ZOOM = 50
+const MIN_ZOOM = 10
 const MAX_ZOOM = 1000
 const MIN_OPACITY = 0
 const MAX_OPACITY = 100
@@ -229,6 +230,11 @@ function App() {
   const [automationBoards, setAutomationBoards] = useState([])
   const [pendingBoardPlacement, setPendingBoardPlacement] = useState(null)
   const [pendingAvOrganizerPlacement, setPendingAvOrganizerPlacement] = useState(null)
+  const [pendingOcPlacement, setPendingOcPlacement] = useState(null)
+  const [pendingCurtainEquipment, setPendingCurtainEquipment] = useState(null)
+  const [placedCurtains, setPlacedCurtains] = useState([])
+  const [selectedCurtainId, setSelectedCurtainId] = useState(null)
+  const [renamingCurtainId, setRenamingCurtainId] = useState(null)
   const [editingBoardId, setEditingBoardId] = useState(null)
   const [editingAvOrganizerId, setEditingAvOrganizerId] = useState(null)
   const [avOrganizers, setAvOrganizers] = useState([])
@@ -736,7 +742,7 @@ function App() {
     setSelectedBoardId(null)
   }
 
-  const handleEquipmentDropped = ({ polygonId, point, equipment }) => {
+  const handleEquipmentDropped = ({ polygonId, point, equipment, wallNormal }) => {
     const catalogItemId = equipment.catalogItemId ?? equipment.id
 
     if (isBoardOnlyItem(catalogItemId)) {
@@ -770,6 +776,16 @@ function App() {
       return
     }
 
+    if (OC_SENSOR_CATALOG_IDS.has(catalogItemId)) {
+      setPendingOcPlacement({ polygonId, point, equipment, wallNormal: wallNormal ?? null, environmentId: environment.id })
+      return
+    }
+
+    if (CURTAIN_CATALOG_IDS.has(catalogItemId)) {
+      setPendingCurtainEquipment({ polygonId, point, equipment, environmentId: environment.id })
+      return
+    }
+
     const equipmentId = `equip-${Date.now()}-${Math.round(Math.random() * 1000)}`
     const nextEquipment = {
       id: equipmentId,
@@ -781,6 +797,7 @@ function App() {
       catalogItemId: equipment.catalogItemId ?? equipment.id,
       filterKeys: equipment.filterKeys ?? [],
       environmentId: environment.id,
+      wallNormal: wallNormal ?? null,
     }
 
     setPlacedEquipments((curr) => [...curr, nextEquipment])
@@ -795,18 +812,141 @@ function App() {
     )
   }
 
-  const handleStartMultiAddPlacement = ({ quantity, equipment }) => {
+  const handleOcSensitivityConfirm = (sensitivity) => {
+    const pending = pendingOcPlacement
+    if (!pending) return
+    setPendingOcPlacement(null)
+    const equipmentId = `equip-${Date.now()}-${Math.round(Math.random() * 1000)}`
+    const nextEquipment = {
+      id: equipmentId,
+      polygonId: pending.polygonId,
+      point: pending.point,
+      label: pending.equipment.label,
+      iconSrc: pending.equipment.iconSrc,
+      iconKey: pending.equipment.iconKey,
+      catalogItemId: pending.equipment.catalogItemId ?? pending.equipment.id,
+      filterKeys: pending.equipment.filterKeys ?? [],
+      environmentId: pending.environmentId,
+      wallNormal: pending.wallNormal,
+      ocSensitivity: sensitivity,
+    }
+    setPlacedEquipments((curr) => [...curr, nextEquipment])
+    setProjectTree((curr) =>
+      appendEquipmentToEnvironment(curr, pending.environmentId, {
+        id: equipmentId,
+        label: pending.equipment.label,
+        icon: pending.equipment.iconKey ?? 'drivers',
+        iconSrc: pending.equipment.iconSrc,
+        source: 'equipment-item',
+      }),
+    )
+  }
+
+  const handleOcSensitivityCancel = () => setPendingOcPlacement(null)
+
+  const handleOcSensitivityEdit = (equipmentId, currentSensitivity) => {
+    const eq = placedEquipments.find((e) => e.id === equipmentId)
+    if (!eq) return
+    setPendingOcPlacement({ _editId: equipmentId, polygonId: eq.polygonId, point: eq.point, equipment: eq, wallNormal: eq.wallNormal, environmentId: eq.environmentId, currentSensitivity: currentSensitivity ?? eq.ocSensitivity })
+  }
+
+  const handleOcSensitivityEditConfirm = (sensitivity) => {
+    const pending = pendingOcPlacement
+    if (!pending?._editId) { handleOcSensitivityConfirm(sensitivity); return }
+    setPlacedEquipments((curr) => curr.map((e) => e.id === pending._editId ? { ...e, ocSensitivity: sensitivity } : e))
+    setPendingOcPlacement(null)
+  }
+
+  const handleCurtainRectDrawn = ({ rectStart, rectEnd }) => {
+    const pending = pendingCurtainEquipment
+    if (!pending) return
+    const curtainId = `curtain-${Date.now()}-${Math.round(Math.random() * 1000)}`
+    const newCurtain = {
+      id: curtainId,
+      catalogItemId: pending.equipment.catalogItemId ?? pending.equipment.id,
+      polygonId: pending.polygonId,
+      environmentId: pending.environmentId,
+      label: pending.equipment.label,
+      iconSrc: pending.equipment.iconSrc,
+      iconKey: pending.equipment.iconKey,
+      filterKeys: pending.equipment.filterKeys ?? [],
+      rectStart,
+      rectEnd,
+      motorSide: 'a',
+    }
+    setPlacedCurtains((curr) => [...curr, newCurtain])
+    setProjectTree((curr) =>
+      appendEquipmentToEnvironment(curr, pending.environmentId, {
+        id: curtainId,
+        label: pending.equipment.label,
+        icon: pending.equipment.iconKey ?? 'cortina',
+        iconSrc: pending.equipment.iconSrc,
+        source: 'equipment-item',
+      }),
+    )
+    setPendingCurtainEquipment(null)
+  }
+
+  const handleCurtainCancel = () => setPendingCurtainEquipment(null)
+
+  const handleCurtainMotorFlip = (curtainId) => {
+    setPlacedCurtains((curr) =>
+      curr.map((c) => c.id === curtainId ? { ...c, motorSide: c.motorSide === 'a' ? 'b' : 'a' } : c),
+    )
+  }
+
+  const handleCurtainMoved = ({ curtainId, rectStart, rectEnd }) => {
+    setPlacedCurtains((curr) =>
+      curr.map((c) => c.id === curtainId ? { ...c, rectStart, rectEnd } : c),
+    )
+  }
+
+  const handleSelectCurtain = (id) => {
+    setSelectedCurtainId(id)
+    setSelectedEquipmentId(null)
+    setSelectedBoardId(null)
+    setSelectedAvOrganizerId(null)
+    setRenamingCurtainId(null)
+  }
+
+  const handleCurtainRenameRequest = (curtainId) => {
+    const curtain = placedCurtains.find((c) => c.id === curtainId)
+    if (!curtain) return
+    setRenamingCurtainId(curtainId)
+    setSelectedCurtainId(curtainId)
+  }
+
+  const handleCurtainRenameCommit = (curtainId, newName) => {
+    const trimmed = (newName ?? '').trim()
+    if (trimmed) {
+      setPlacedCurtains((curr) => curr.map((c) => c.id === curtainId ? { ...c, label: trimmed } : c))
+      setProjectTree((curr) => updateNodeLabel(curr, curtainId, trimmed))
+    }
+    setRenamingCurtainId(null)
+  }
+
+  const handleDeleteCurtain = (curtainId) => {
+    setPlacedCurtains((curr) => curr.filter((c) => c.id !== curtainId))
+    setProjectTree((curr) => removeNodeById(curr, curtainId))
+    setSelectedCurtainId((curr) => curr === curtainId ? null : curr)
+    setRenamingCurtainId((curr) => curr === curtainId ? null : curr)
+  }
+
+  const handleStartMultiAddPlacement = ({ quantity, equipment, sameCircuit }) => {
     const parsedQuantity = Number.parseInt(quantity, 10)
 
     if (!equipment?.label || !equipment?.iconSrc || Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
       return
     }
 
+    const isLighting = LIGHTING_CATALOG_IDS.has(equipment.catalogItemId ?? equipment.id)
+
     setActiveTool('select')
     setMultiAddPlacementRequest({
       token: Date.now(),
       quantity: parsedQuantity,
       equipment,
+      sameCircuit: isLighting ? Boolean(sameCircuit) : false,
     })
   }
 
@@ -818,6 +958,9 @@ function App() {
       return
     }
 
+    const sameCircuit = Boolean(multiAddPlacementRequest?.sameCircuit)
+    const circuitId = sameCircuit ? `circuit-${Date.now()}` : null
+
     const equipmentsToInsert = points.map((point, index) => ({
       id: `equip-${Date.now()}-${index}-${Math.round(Math.random() * 1000)}`,
       polygonId,
@@ -828,12 +971,15 @@ function App() {
       catalogItemId: equipment.catalogItemId ?? equipment.id,
       filterKeys: equipment.filterKeys ?? [],
       environmentId: environment.id,
+      ...(circuitId ? { circuitId, isCircuitLeader: index === 0 } : {}),
     }))
 
     setPlacedEquipments((currentEquipments) => [...currentEquipments, ...equipmentsToInsert])
 
+    // Circuit: only the leader (first item) goes into the project tree
+    const treeItems = sameCircuit ? [equipmentsToInsert[0]] : equipmentsToInsert
     setProjectTree((currentTree) =>
-      equipmentsToInsert.reduce(
+      treeItems.reduce(
         (tree, currentEquipment) =>
           appendEquipmentToEnvironment(tree, environment.id, {
             id: currentEquipment.id,
@@ -849,7 +995,7 @@ function App() {
     setMultiAddPlacementRequest(null)
   }
 
-  const handleEquipmentMoved = ({ equipmentId, polygonId, point }) => {
+  const handleEquipmentMoved = ({ equipmentId, polygonId, point, wallNormal }) => {
     const nextEnvironment = environments.find((currentEnvironment) => currentEnvironment.polygonId === polygonId)
     if (!nextEnvironment) {
       return
@@ -871,6 +1017,7 @@ function App() {
           polygonId,
           point,
           environmentId: nextEnvironment.id,
+          ...(wallNormal !== undefined ? { wallNormal } : {}),
         }
       }),
     )
@@ -892,7 +1039,7 @@ function App() {
     }
   }
 
-  const handlePolygonTranslated = ({ polygonId, equipmentPoints, boardPoints, avOrganizerPoints }) => {
+  const handlePolygonTranslated = ({ polygonId, equipmentPoints, boardPoints, avOrganizerPoints, curtainRects }) => {
     if (!polygonId) return
 
     if (equipmentPoints?.length) {
@@ -933,9 +1080,40 @@ function App() {
         }),
       )
     }
+
+    if (curtainRects?.length) {
+      const translatedRectByCurtainId = Object.fromEntries(
+        curtainRects.map(({ curtainId, rectStart, rectEnd }) => [curtainId, { rectStart, rectEnd }]),
+      )
+      setPlacedCurtains((current) =>
+        current.map((c) => {
+          const next = translatedRectByCurtainId[c.id]
+          if (!next || c.polygonId !== polygonId) return c
+          return { ...c, rectStart: next.rectStart, rectEnd: next.rectEnd }
+        }),
+      )
+    }
   }
 
   const handleDeleteEquipment = (equipmentId) => {
+    const targetEquipment = placedEquipments.find((e) => e.id === equipmentId)
+    const circuitId = targetEquipment?.circuitId
+
+    if (circuitId) {
+      // Delete all members of the circuit; only the leader is in the project tree
+      const memberIds = new Set(
+        placedEquipments.filter((e) => e.circuitId === circuitId).map((e) => e.id),
+      )
+      const leaderId = placedEquipments.find((e) => e.circuitId === circuitId && e.isCircuitLeader)?.id
+      setPlacedEquipments((curr) => curr.filter((e) => !memberIds.has(e.id)))
+      if (leaderId) setProjectTree((curr) => removeNodeById(curr, leaderId))
+      setSelectedEquipmentId((curr) => (memberIds.has(curr) ? null : curr))
+      setRenamingEquipmentId((curr) => (memberIds.has(curr) ? null : curr))
+      setRenamingEquipmentSource(null)
+      setEquipmentPropertiesId((curr) => (memberIds.has(curr) ? null : curr))
+      return
+    }
+
     setPlacedEquipments((currentEquipments) =>
       currentEquipments.filter((equipment) => equipment.id !== equipmentId),
     )
@@ -1133,12 +1311,20 @@ function App() {
   const handleCommitEquipmentRename = (equipmentId, newName) => {
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
-      setPlacedEquipments((currentEquipments) =>
-        currentEquipments.map((equipment) =>
-          equipment.id === equipmentId ? { ...equipment, label: trimmed } : equipment,
-        ),
-      )
-      setProjectTree((currentTree) => updateNodeLabel(currentTree, equipmentId, trimmed))
+      const circuitId = placedEquipments.find((e) => e.id === equipmentId)?.circuitId
+      if (circuitId) {
+        const memberIds = new Set(placedEquipments.filter((e) => e.circuitId === circuitId).map((e) => e.id))
+        const leaderId = placedEquipments.find((e) => e.circuitId === circuitId && e.isCircuitLeader)?.id
+        setPlacedEquipments((curr) => curr.map((e) => memberIds.has(e.id) ? { ...e, label: trimmed } : e))
+        if (leaderId) setProjectTree((curr) => updateNodeLabel(curr, leaderId, trimmed))
+      } else {
+        setPlacedEquipments((currentEquipments) =>
+          currentEquipments.map((equipment) =>
+            equipment.id === equipmentId ? { ...equipment, label: trimmed } : equipment,
+          ),
+        )
+        setProjectTree((currentTree) => updateNodeLabel(currentTree, equipmentId, trimmed))
+      }
     }
     setRenamingEquipmentId(null)
     setRenamingEquipmentSource(null)
@@ -1166,6 +1352,7 @@ function App() {
     setRenamingBoardId(null)
     setRenamingBoardSource(null)
     setRenamingGenericNodeId(null)
+    setRenamingCurtainId(null)
   }
 
   const handleSelectTreeNode = (node) => {
@@ -1402,6 +1589,9 @@ function App() {
   const selectedPolygonId = selectedEnvironment?.polygonId ?? null
   const selectedNodeId = selectedBoardId ?? selectedEquipmentId ?? selectedEnvironmentId
   const equipmentPropertiesEquipment = placedEquipments.find((equipment) => equipment.id === equipmentPropertiesId) ?? null
+  const equipmentPropertiesLampCount = equipmentPropertiesEquipment?.circuitId
+    ? placedEquipments.filter((e) => e.circuitId === equipmentPropertiesEquipment.circuitId).length
+    : 1
   const equipmentPropertiesEnvironment = environments.find(
     (environment) => environment.id === equipmentPropertiesEquipment?.environmentId,
   )
@@ -1595,6 +1785,19 @@ function App() {
                 onAvOrganizerEdit={handleAvOrganizerEditRequest}
                 onAvOrganizerLabelDoubleClick={handleAvOrganizerLabelDoubleClick}
                 onAvOrganizerLabelRenameCommit={handleCommitAvOrganizerLabelRename}
+                pendingCurtainEquipment={pendingCurtainEquipment}
+                placedCurtains={placedCurtains}
+                selectedCurtainId={selectedCurtainId}
+                onCurtainRectDrawn={handleCurtainRectDrawn}
+                onCurtainCancel={handleCurtainCancel}
+                onCurtainMotorFlip={handleCurtainMotorFlip}
+                onCurtainMove={handleCurtainMoved}
+                onCurtainSelect={handleSelectCurtain}
+                renamingCurtainId={renamingCurtainId}
+                onCurtainRenameRequest={handleCurtainRenameRequest}
+                onCurtainLabelDoubleClick={handleCurtainRenameRequest}
+                onCurtainLabelRenameCommit={handleCurtainRenameCommit}
+                onCurtainDelete={handleDeleteCurtain}
                 onEquipmentDelete={handleDeleteEquipment}
                 selectedEquipmentId={selectedEquipmentId}
                 renamingEquipmentId={renamingEquipmentCanvasId}
@@ -1633,6 +1836,7 @@ function App() {
                   setSelectedEquipmentId(null)
                   setSelectedBoardId(null)
                   setSelectedAvOrganizerId(null)
+                  setSelectedCurtainId(null)
                 }}
                 onLabelClick={(polygonId) => {
                   const env = environments.find((e) => e.polygonId === polygonId)
@@ -1650,6 +1854,7 @@ function App() {
                 onEquipmentLabelDoubleClick={(equipmentId) => handleStartEquipmentRename(equipmentId, 'canvas')}
                 onEquipmentRenameRequest={(equipmentId) => handleStartEquipmentRename(equipmentId, 'canvas')}
                 onEquipmentPropertiesRequest={handleOpenEquipmentProperties}
+                onEquipmentOcSensitivityRequest={handleOcSensitivityEdit}
                 onEquipmentLabelRenameCommit={handleCommitEquipmentRename}
                 onCancelRename={handleCancelRename}
               />
@@ -1710,6 +1915,13 @@ function App() {
                   onClose={() => setEditingAvOrganizerId(null)}
                 />
               ) : null}
+              {pendingOcPlacement ? (
+                <OcSensitivityOverlay
+                  currentSensitivity={pendingOcPlacement.currentSensitivity ?? pendingOcPlacement._editId ? pendingOcPlacement.currentSensitivity : undefined}
+                  onConfirm={pendingOcPlacement._editId ? handleOcSensitivityEditConfirm : handleOcSensitivityConfirm}
+                  onCancel={handleOcSensitivityCancel}
+                />
+              ) : null}
               {pendingDeletePolygonId ? (
                 <DeleteEnvironmentConfirmOverlay
                   onConfirm={handleConfirmDeletePolygon}
@@ -1743,6 +1955,7 @@ function App() {
                 <EquipmentPropertiesOverlay
                   equipment={equipmentPropertiesEquipment}
                   environmentName={equipmentPropertiesEnvironment?.name ?? 'Ambiente'}
+                  lampCount={equipmentPropertiesLampCount}
                   onClose={() => setEquipmentPropertiesId(null)}
                 />
               ) : null}

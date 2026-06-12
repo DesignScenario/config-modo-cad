@@ -83,7 +83,7 @@ function ColorSwatch({ label, color }) {
   )
 }
 
-function LuminariaContent({ equipmentName, environmentName }) {
+function LuminariaContent({ equipmentName, environmentName, lampCount = 1 }) {
   return (
     <div className="cad-equip-props-overlay__panel">
       <div className="cad-equip-props-overlay__panel-header">
@@ -114,9 +114,9 @@ function LuminariaContent({ equipmentName, environmentName }) {
             />
           </Card>
           <Card title="Informações Técnicas">
-            <FieldRow label="Circuito" control={<ReadOnlyInput value="0" />} />
+            <FieldRow label="Circuito" control={<ReadOnlyInput value="1" />} />
             <FieldRow label="Potência unitária (W)" control={<ReadOnlyInput value="1" />} />
-            <FieldRow label="Número de lâmpadas" control={<ReadOnlyInput value="1" />} />
+            <FieldRow label="Número de lâmpadas" control={<ReadOnlyInput value={String(lampCount)} />} />
             <FieldRow label="Tensão" control={<ReadOnlySelect value="127V" width="90px" />} />
           </Card>
         </div>
@@ -221,14 +221,14 @@ function DefaultContent() {
   )
 }
 
-function EquipmentPropertiesOverlay({ equipment, environmentName = 'Ambiente', onClose }) {
+function EquipmentPropertiesOverlay({ equipment, environmentName = 'Ambiente', lampCount = 1, onClose }) {
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
   const equipmentName = equipment?.label ?? 'Equipamento'
 
   let content = <DefaultContent />
 
-  if (equipment?.catalogItemId === 'amb-iluminacao-1') {
-    content = <LuminariaContent equipmentName={equipmentName} environmentName={environmentName} />
+  if (equipment?.catalogItemId === 'amb-iluminacao-1' || equipment?.catalogItemId === 'amb-iluminacao-2' || equipment?.catalogItemId === 'amb-iluminacao-3') {
+    content = <LuminariaContent equipmentName={equipmentName} environmentName={environmentName} lampCount={lampCount} />
   } else if (equipment?.catalogItemId === 'sce-keypads-prestige-3') {
     content = <PstKp3Content equipmentName={equipmentName} environmentName={environmentName} />
   }

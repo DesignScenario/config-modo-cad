@@ -287,7 +287,7 @@ O `CadCanvas.jsx` implementa o motor gráfico completo. Capacidades internas:
 - `getPolygonLabelPlacement()`: posiciona o rótulo no canto superior-esquerdo interno do polígono (ponto mais alto), testando candidatos com `canPlaceLabelBox`; fallback para `getPolygonVisualCenter` se não houver espaço. Usa `wrapLabelText` e tamanho adaptativo (10–14 px).
 - `EQUIPMENT_HOLD_TO_DRAG_MS` (180ms): tempo mínimo de pressão para iniciar arrastar (diferencia tap de drag).
 - `distributePointsBetween()`: distribui N pontos uniformemente entre dois pontos para adição múltipla.
-- Zoom via wheel com fator de **1.1× por delta**, limitado a 50–1000%.
+- Zoom via wheel com fator de **1.1× por delta**, limitado a 10–1000%.
 
 ### 3.5 Estrutura de Dados — Quadro Custom e Organizador AV
 
@@ -565,4 +565,143 @@ gap = (leading_extremo_dir - trailing_extremo_esq - soma_tamanhos_do_meio) / (n 
 
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.14*
+### v1.0.16 — Cortinas Completas, Zoom e Visibilidade de Textos (Junho de 2026)
+
+Esta versão finaliza o suporte completo às cortinas como elementos retangulares interativos e implementa o sistema de visibilidade progressiva de rótulos por nível de zoom, incluindo posicionamento inteligente para evitar sobreposições.
+
+#### 8.1 Cortinas — Rendering e Interações Completas
+
+As cortinas passaram a ser tratadas como equipamentos de primeira classe, com renderização e interações equivalentes aos demais elementos do canvas.
+
+**Estrutura de dados:**
+```js
+{ id, catalogItemId, polygonId,
+  rectStart: {x, y}, rectEnd: {x, y},  // coordenadas normalizadas [0..1]
+  label, iconSrc, iconKey, filterKeys, environmentId,
+  motorSide: 'left' | 'right' }
+```
+
+**Rendering:**
+
+| Elemento | Comportamento |
+|---|---|
+| Retângulo | HTML div absolutamente posicionado com `left/top/width/height` em pixels |
+| Ícone | Centralizado no retângulo via `.cad-curtain-icon-center` |
+| Rótulo | `font-size: 11px` — idêntico aos demais equipamentos; posicionado via `equipmentLabelOffsets` |
+| Seleção | Borda azul (`.is-selected`) ao clicar |
+
+**Interações:**
+
+| Ação | Comportamento |
+|---|---|
+| Clique | Seleciona |
+| Duplo clique no rótulo | Renomeio inline (input segue posição atual do rótulo) |
+| Botão direito | Menu de contexto: Renomear / Editar tamanho / Trocar lado do motor / Excluir |
+| Editar tamanho | Handles nos 4 cantos — arrastar move o canto correspondente com pointer capture |
+| Trocar lado do motor | Alterna `motorSide` (`'left'` ↔ `'right'`) |
+| `Delete`/`Backspace` | Exclui quando selecionada |
+
+**Movimento com polígono:** ambos os pontos (`rectStart` e `rectEnd`) são rastreados nas 3 fases do arraste de polígono — setup (`initialCurtainRects`), live rendering (aplica `stageDelta` a ambos) e commit (`curtainRects` no payload de `onPolygonTranslated`).
+
+#### 8.2 Sistema de Visibilidade Progressiva por Zoom
+
+Todos os rótulos passam por três estágios baseados no nível de zoom atual:
+
+**Equipamentos** (constantes `EQUIP_TEXT_ZOOM_FULL = 120`, `EQUIP_TEXT_ZOOM_TRUNCATED = 100`):
+
+| Estágio | Faixa | Comportamento |
+|---|---|---|
+| Completo | ≥ 120% | Rótulo exibido integralmente |
+| Truncado | 100%–119% | Rótulo truncado com `…`; `maxWidth` interpolado |
+| Oculto | < 100% | Rótulo não renderizado |
+
+**Ambientes** (constantes `ENV_TEXT_ZOOM_FULL = 40`, `ENV_TEXT_ZOOM_TRUNCATED = 20`):
+
+| Estágio | Faixa | Comportamento |
+|---|---|---|
+| Completo | ≥ 40% | Rótulo + pé-direito exibidos |
+| Truncado | 20%–39% | Apenas primeira linha do rótulo; pé-direito oculto |
+| Oculto | < 20% | Apenas o polígono renderizado |
+
+`MIN_ZOOM` reduzido de **50% para 10%** nos três arquivos que definem o clamp (`CadCanvas.jsx`, `App.jsx`, `TopToolbar.jsx`), tornando os limiares de ambiente atingíveis.
+
+#### 8.3 Posicionamento Inteligente de Rótulos de Equipamentos
+
+O `useMemo` `equipmentLabelOffsets` calcula `{ left, top, maxWidth }` para cada equipamento visível usando um algoritmo greedy por polígono:
+
+1. Agrupa equipamentos por ambiente
+2. Para cada equipamento: testa 8 posições candidatas (abaixo, acima, direita, esquerda + 4 diagonais)
+3. Candidato válido: todos os 4 cantos da bounding box do rótulo estão **dentro do polígono** (`isPointInsidePolygon`)
+4. Escolhe o candidato com **menor área de sobreposição** com rótulos e ícones já posicionados (`computeOverlapArea`)
+5. Fallback para direita se nenhum candidato for válido
+
+O input de renomeio inline aplica o mesmo offset do label calculado, para que o campo apareça na posição atual do rótulo.
+
+#### 8.4 Pulsadores e Teclados com Sensor Embutido (Wall Snap)
+
+Pulsadores com sensor de movimento e teclados com sensor PIR ou OC passaram a ter comportamento especializado no canvas: ao serem soltos no polígono, encostam automaticamente na parede mais próxima e exibem sua área de detecção orientada para o interior do ambiente.
+
+**Tipos de sensor e seus equipamentos:**
+
+| Tipo | Equipamentos |
+|---|---|
+| **PIR** (cone) | AC-KPUL0/1/2/3-MOV (Virtue e Metal), AC-PULS3-MOV (Essence), EB-KP0M, EB-KP0Mv2, EB-KP6M, EB-KP6Mv2, EB-KP6M-4R-WIFI, ESN-KP3M-PIR, ESN-KP3M-PIR-4R-WIFI, PST-KP6M-PIR |
+| **OC** (elipse) | EB-KP6M-OC, ESN-KP3M-OC, PST-KP6M-OC |
+
+**Wall Snap:** ao soltar qualquer item de `WALL_SNAP_CATALOG_IDS` no canvas, a função `snapToNearestWall()` projeta o ponto sobre a aresta mais próxima do polígono e calcula o vetor normal **inward**. O `wallNormal` é salvo no objeto do equipamento e reutilizado para orientar a área de detecção.
+
+**Áreas de detecção:**
+
+| Sensor | Shape | Dimensões | Orientação |
+|---|---|---|---|
+| PIR | `Wedge` (cone) Konva | Raio 7 m, ângulo 90° fixo | `wallNormal` do equipamento |
+| OC | `Ellipse` Konva | Variável por `ocSensitivity` | `wallNormal` do equipamento |
+
+**Sensibilidade OC** (configurável via menu de contexto):
+
+| Nível | Profundidade | Largura |
+|---|---|---|
+| Baixa | 1 m | 0,667 m |
+| Média | 6 m | 6 m |
+| Alta | 12 m | 8 m |
+
+Ambas as áreas são recortadas pelo polígono (`clipFunc`) e acompanham o equipamento em tempo real durante arraste e translação de polígono.
+
+**Novos exports em `src/data/equipmentLibrary.js`:** `WALL_SNAP_CATALOG_IDS`, `PIR_SENSOR_CATALOG_IDS`, `OC_SENSOR_CATALOG_IDS`.
+
+#### 8.5 Circuitos de Lâmpadas
+
+Ao inserir múltiplas luminárias via **Adição Múltipla**, um checkbox aparece no overlay: **"As luminárias farão parte do mesmo circuito"** (exclusivo para itens de iluminação: Luminária Genérica, LED RGB PWM, LED CCT/Circadiano).
+
+**Estrutura de dados:** todos os membros do circuito compartilham um `circuitId` único (`'circuit-${Date.now()}'`). O primeiro item recebe `isCircuitLeader: true` e é o **único inserido na árvore do projeto** — os demais existem apenas em `placedEquipments`.
+
+**Representação visual:** uma Konva `Line` azul semitransparente (`rgba(120, 180, 255, 0.6)`, 2px) conecta todos os membros na ordem, atualizada em tempo real durante arraste.
+
+**Comportamento de interação:**
+
+| Ação | Resultado |
+|---|---|
+| Clique simples | Seleciona todo o circuito; foca o líder na árvore |
+| Duplo clique | Isola aquela lâmpada para arraste individual |
+| Arraste | Move todo o circuito junto |
+| Arraste após isolamento | Move só a lâmpada duplo-clicada |
+| Excluir | Remove todos os membros do circuito |
+
+**Painel de propriedades:** exibe contador `lampCount` com o total de lâmpadas do circuito.
+
+#### 8.6 Arquivos Criados / Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/components/CadCanvas.jsx` | Seções de cortina (rendering, context menu, resize handles, rename inline, movement); `equipmentLabelOffsets` useMemo; `equipLabelStage`/`envLabelStage`; `MIN_ZOOM = 10`; renderização PIR (Wedge) e OC (Ellipse); `snapToNearestWall`; constantes `PIR_RADIUS_METERS`, `PIR_CONE_ANGLE_DEG`, `OC_DIMENSIONS` |
+| `src/data/equipmentLibrary.js` | Exports `WALL_SNAP_CATALOG_IDS`, `PIR_SENSOR_CATALOG_IDS`, `OC_SENSOR_CATALOG_IDS`, `LIGHTING_CATALOG_IDS` |
+| `src/components/AddMultipleItemsOverlay.jsx` | Checkbox "mesmo circuito" (visível só para luminárias); prop `isLighting` |
+| `src/components/EquipmentPropertiesOverlay.jsx` | Exibe `lampCount` para equipamentos em circuito |
+| `src/App.jsx` | `renamingCurtainId`, `selectedCurtainId`; handlers de cortina (rename, delete, select, translate); `MIN_ZOOM = 10` |
+| `src/components/TopToolbar.jsx` | `MIN_ZOOM = 10` |
+| `src/styles/cad.css` | `.cad-curtain-icon-center` (ícone centralizado); `.cad-curtain-resize-handle` (handle de canto 10×10px) |
+| `md/feature-zoom-e-textos.md` | Atualização das tabelas de limiares para refletir constantes reais |
+
+---
+
+*Relatório atualizado em Junho de 2026 — v1.0.16*

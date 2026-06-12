@@ -34,7 +34,7 @@ import sensores from '../assets/sensores.svg'
 import tw10 from '../assets/tw10.svg'
 import tw4 from '../assets/tw4.svg'
 import ventiladores from '../assets/ventilador.svg'
-import { equipmentLibraryTabs, getEquipmentFilterKeys } from '../data/equipmentLibrary.js'
+import { equipmentLibraryTabs, getEquipmentFilterKeys, LIGHTING_CATALOG_IDS } from '../data/equipmentLibrary.js'
 import { useDraggable } from '../hooks/useDraggable.js'
 
 const TAB_NAMES = ['Ambiente', 'Scenario', 'Drivers']
@@ -393,9 +393,11 @@ function EquipmentLibraryOverlay({ onClose, onStartMultiAddPlacement }) {
     {multiAddItem ? (
       <AddMultipleItemsOverlay
         itemLabel={multiAddItem.label}
-        onConfirm={({ quantity }) => {
+        isLighting={LIGHTING_CATALOG_IDS.has(multiAddItem.id)}
+        onConfirm={({ quantity, sameCircuit }) => {
           onStartMultiAddPlacement?.({
             quantity,
+            sameCircuit,
             equipment: {
               id: multiAddItem.id,
               catalogItemId: multiAddItem.id,
