@@ -84,9 +84,11 @@ O painel lateral é redimensionável via arrastar o divisor (splitter), com limi
 | Polígono (`polygon`) | Desenha ambientes como polígonos de múltiplos vértices com fechamento automático ao aproximar do ponto inicial |
 | Régua / Linha de escala | Traça segmento de referência para calibração de escala |
 | Mover | Deslocamento de elementos no canvas |
-| Retângulo | Ferramenta de forma retangular (declarada na toolbar) |
-| Triângulo | Ferramenta de forma triangular (declarada na toolbar) |
-| Círculo | Ferramenta de forma circular (declarada na toolbar) |
+| Retângulo (`rectangle`) | 2 cliques definem o bounding box; Shift → quadrado; Alt → centro no 1º ponto; Shift+Alt → quadrado centrado |
+| Elipse (`elipse`) | 2 cliques definem o bounding box; gera polígono de 64 vértices; Shift → círculo; Alt → centro no 1º ponto; Shift+Alt → círculo centrado |
+| Triângulo (`triangle`) | 2 cliques definem o bounding box; base inferior, ápice no centro superior; Shift → equilátero; Alt → centro no 1º ponto; Shift+Alt → equilátero centrado |
+
+Todas as três ferramentas de forma (Retângulo, Elipse, Triângulo) geram polígonos que se comportam exatamente como ambientes — passam pelo `onPolygonCreated`, abrem o overlay de ambiente e entram na árvore do projeto.
 
 O canvas suporta **zoom via scroll** (50% a 1000%), **ajuste de opacidade** do fundo (0 a 100%) e **rotação da planta** em incrementos de 90°.
 
@@ -98,7 +100,7 @@ Cada ambiente possui:
 - **Classe** (tipo de cômodo): Dormitório, Banheiro, Social, Serviço, Circulação, Lazer, Externo, Trabalho, Garagem, Apoio ou Não definida.
 - **Altura de teto** em metros.
 - Cor de preenchimento semi-transparente (`#6BC2F7`) controlada por classe.
-- **Rótulo centralizado** automaticamente dentro do polígono, com quebra de linha inteligente e tamanho de fonte adaptativo (10–14 px).
+- **Rótulo alinhado ao ponto mais alto do polígono** (âncora no canto superior-esquerdo interno), com quebra de linha inteligente e tamanho de fonte adaptativo (10–14 px); fallback para o centro visual quando não há espaço suficiente próximo ao topo.
 - Seleção visual por clique com mudança de cor para azul (`#0095ff`) ao selecionar.
 - **Menu contextual** por clique com botão auxiliar ou longo toque.
 - **Tradução de polígono** (arrastar o ambiente inteiro), com atualização coordenada de todos os equipamentos, quadros e organizadores AV dentro dele.
@@ -282,7 +284,7 @@ O `CadCanvas.jsx` implementa o motor gráfico completo. Capacidades internas:
 - **Coordenadas normalizadas**: `stageToNorm` / `normToStage` convertem entre espaço de stage e coordenadas `[0..1]` relativas à imagem, mantendo posição correta após rotação e zoom.
 - `isPointInsidePolygon()`: algoritmo de **ray casting** para detecção ponto-polígono.
 - `rotatePoint` / `rotateVector()`: operações de rotação para suporte ao `imageRotation`.
-- `getPolygonLabelPlacement()`: busca a melhor posição interna para o rótulo via sampling, com quebra de linha (`wrapLabelText`) e tamanho adaptativo.
+- `getPolygonLabelPlacement()`: posiciona o rótulo no canto superior-esquerdo interno do polígono (ponto mais alto), testando candidatos com `canPlaceLabelBox`; fallback para `getPolygonVisualCenter` se não houver espaço. Usa `wrapLabelText` e tamanho adaptativo (10–14 px).
 - `EQUIPMENT_HOLD_TO_DRAG_MS` (180ms): tempo mínimo de pressão para iniciar arrastar (diferencia tap de drag).
 - `distributePointsBetween()`: distribui N pontos uniformemente entre dois pontos para adição múltipla.
 - Zoom via wheel com fator de **1.1× por delta**, limitado a 50–1000%.
@@ -432,6 +434,193 @@ Esta versão introduziu uma revisão completa do modelo de slots para o **Quadro
 | `src/components/CadCanvas.jsx` | Cálculo de colunas dinâmico (`Math.min(slots.length, columnCount)`); slot vazio renderiza `+`; props `onBoardEdit`, `onAvOrganizerEdit`; menu contextual atualizado; `openBoardContextMenu` detecta `isDynamic` para exibir "Propriedades" condicionalmente |
 | `src/styles/cad.css` | Adicionado `.cad-multi-overlay__title-bar--av` com `background: #2980b9` |
 
+### v1.0.13 — Ferramentas de Forma: Elipse e Triângulo + Aprimoramento do Retângulo (Junho de 2026)
+
+#### 6.1 Novas Ferramentas
+
+| Ferramenta | Descrição |
+|---|---|
+| **Elipse** | Renomeada de "Círculo"; gera polígono de 64 segmentos a partir de bounding box de 2 cliques |
+| **Triângulo** | Nova ferramenta; gera triângulo isósceles (ou equilátero com Shift) a partir de bounding box |
+
+#### 6.2 Modificadores de Teclado (Shift / Alt)
+
+Todas as ferramentas de forma (Retângulo, Elipse, Triângulo) passam a suportar:
+
+| Combinação | Comportamento |
+|---|---|
+| **Shift** | Retângulo → quadrado; Elipse → círculo; Triângulo → equilátero (height = width × √3/2) |
+| **Alt** | Centro da forma no 1º ponto clicado; forma expande simetricamente |
+| **Shift + Alt** | Forma proporcional e centrada no 1º ponto |
+
+#### 6.3 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/components/CadCanvas.jsx` | Novas funções `computeShapeBox`, `pointsFromShapeBox`; constantes `ELLIPSE_SEGMENTS`, `SHAPE_DRAW_TOOLS`; estados `shapeDraftStart/Cursor/Modifiers` substituem `rectDraftStart/Cursor`; handlers de clique e mouse move unificados para as 3 ferramentas |
+| `src/components/TopToolbar.jsx` | Renomeado "Círculo" → "Elipse"; `activeTool === 'circle'` → `'elipse'` |
+
+### v1.0.14 — Seleção Múltipla no Canvas (Junho de 2026)
+
+Esta versão aprimora a ferramenta **Seleção** (`select`) com dois novos modos de seleção simultânea de múltiplos objetos.
+
+#### 7.1 Rubber Band (arrastar para selecionar)
+
+| Aspecto | Comportamento |
+|---|---|
+| Ativação | Arrastar o mouse na área vazia do canvas com a ferramenta `select` ativa |
+| Limiar de ativação | `RUBBER_BAND_MIN_DRAG = 4 px` (evita ativação por cliques) |
+| Feedback visual | Retângulo tracejado na cor de seleção (`SELECTED_POLYGON_COLOR`) com fill a 8% de opacidade |
+| Critério de seleção de polígonos | AABB do rubber band (coords normalizadas) intersecta o bounding box do polígono (`getPolygonBounds`) |
+| Critério de seleção de equipamentos | O ponto central do equipamento está dentro do rect do rubber band |
+| Finalização | Ao soltar o mouse (`window.addEventListener('mouseup')`) — captura releases fora do Stage |
+
+#### 7.2 Shift+Click (seleção incremental)
+
+| Elemento | Comportamento |
+|---|---|
+| Polígono | `handlePolygonMouseDown` com `event.evt.shiftKey`: faz toggle do `polygonId` em `multiSelectedPolygonIds` |
+| Equipamento | `handleEquipmentMouseDown` com `event.shiftKey`: faz toggle do `equipment.id` em `multiSelectedEquipmentIds` |
+
+#### 7.3 Arquitetura da Seleção Múltipla
+
+O estado de seleção múltipla é **local ao `CadCanvas.jsx`** (não levantado ao `App.jsx`), para minimizar impacto no estado global:
+
+```js
+const [rubberBand, setRubberBand] = useState(null)
+// { startStage: {x,y}, endStage: {x,y} }
+const [multiSelectedPolygonIds, setMultiSelectedPolygonIds] = useState(new Set())
+const [multiSelectedEquipmentIds, setMultiSelectedEquipmentIds] = useState(new Set())
+```
+
+O estado de seleção única em `App.jsx` (`selectedEquipmentId`, `selectedEnvironmentId`, etc.) não é afetado — continua controlando rename/delete/properties de item único.
+
+#### 7.4 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/components/CadCanvas.jsx` | Nova função `rectsIntersect`; estados `rubberBand`, `multiSelectedPolygonIds`, `multiSelectedEquipmentIds`; `handleStageMouseDown` inicia rubber band (só quando `fittedBackgroundImage` está definida); `handleStageMouseMove` atualiza `rubberBand.endStage`; `useEffect` com `window.addEventListener('mouseup')` finaliza seleção; `handlePolygonMouseDown`/`handleEquipmentMouseDown` com suporte a Shift+click; rendering de polígonos e equipamentos verifica multi-seleção; `<Rect>` Konva tracejado renderizado no Stage durante rubber band — só exibido quando distância ≥ `RUBBER_BAND_MIN_DRAG` |
+
+### v1.0.15 — Exclusão em Lote de Itens Multi-Selecionados (Junho de 2026)
+
+Estende a seleção múltipla (v1.0.14) com exclusão em lote via tecla `Delete`/`Backspace`.
+
+#### 8.1 Fluxo de Exclusão em Lote
+
+1. Com itens multi-selecionados, pressionar `Delete`/`Backspace` dispara `onMultiDeleteRequest` em vez da exclusão singular
+2. CadCanvas limpa `multiSelectedPolygonIds` e `multiSelectedEquipmentIds` imediatamente
+3. App.jsx armazena os IDs em `pendingMultiDelete` e exibe `DeleteEnvironmentConfirmOverlay` com mensagem adaptada ao conteúdo da seleção:
+
+| Conteúdo da seleção | Mensagem exibida |
+|---|---|
+| Apenas equipamentos (N > 1) | "Deseja realmente apagar os N equipamentos selecionados?" |
+| Apenas ambientes (N > 1) | "Deseja realmente apagar os N ambientes selecionados?" |
+| Apenas 1 equipamento | "Deseja realmente apagar o equipamento selecionado?" |
+| Apenas 1 ambiente | "Deseja realmente apagar o ambiente selecionado?" |
+| Equipamentos + ambientes | "Deseja realmente apagar os N itens selecionados?" |
+
+4. Ao confirmar: `handleConfirmMultiDelete` chama `handlePolygonDeleted` para cada ambiente e `handleDeleteEquipment` para cada equipamento; seta `multiDeletePolygonIds` para CadCanvas remover os shapes Konva
+
+#### 8.2 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/components/DeleteEnvironmentConfirmOverlay.jsx` | Adicionada prop `message` com valor padrão; texto do overlay passa a ser dinâmico |
+| `src/App.jsx` | Novos estados `pendingMultiDelete`, `multiDeletePolygonIds`; handlers `handleMultiDeleteRequest`, `handleConfirmMultiDelete`, `handleCancelMultiDelete`; novos props `deletePolygonIds` e `onMultiDeleteRequest` em `<CadCanvas>`; overlay condicional para `pendingMultiDelete` |
+| `src/components/CadCanvas.jsx` | Props `deletePolygonIds` e `onMultiDeleteRequest`; `useEffect` para `deletePolygonIds` (filtra array de shapes de uma vez); handler de teclado `Delete` verifica multi-seleção antes da exclusão singular; multi-seleção limpa após disparar o request |
+
+### v1.0.16 — Alinhamento de Itens Multi-Selecionados (Junho de 2026)
+
+Ativa os quatro botões de alinhamento da toolbar para operar sobre a seleção múltipla.
+
+#### 9.1 Comportamento
+
+Os botões de alinhamento (`Alinhar à esquerda`, `Alinhar à direita`, `Alinhar acima`, `Alinhar abaixo`) alinham todos os itens da seleção múltipla usando a borda extrema do conjunto como referência:
+
+| Botão | Referência | Movimento |
+|---|---|---|
+| Alinhar à esquerda | `min(minX)` de todos os itens | Move cada item para que sua borda esquerda = referência |
+| Alinhar à direita | `max(maxX)` de todos os itens | Move cada item para que sua borda direita = referência |
+| Alinhar acima | `min(minY)` de todos os itens | Move cada item para que sua borda superior = referência |
+| Alinhar abaixo | `max(maxY)` de todos os itens | Move cada item para que sua borda inferior = referência |
+
+Para **polígonos/ambientes**: usa o bounding box dos vértices; todos os vértices e os equipamentos/quadros/organizadores AV contidos no polígono se movem juntos.
+
+Para **equipamentos avulsos** (não pertencentes a um polígono selecionado): o ponto de ancoragem se alinha diretamente ao valor de referência. Equipamentos dentro de polígonos selecionados são ignorados (movem com o polígono).
+
+#### 9.2 Correções de Rubber Band
+
+Dois comportamentos do rubber band foram corrigidos nesta versão:
+
+- **Retângulo visível no clique**: o `<Rect>` Konva agora só é renderizado quando a distância de arraste ≥ `RUBBER_BAND_MIN_DRAG = 4 px` — cliques simples não exibem o retângulo.
+- **Rubber band sem imagem**: o rubber band agora só é iniciado quando `fittedBackgroundImage` está definida — não aparece no canvas vazio antes de importar uma planta.
+
+#### 9.3 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/components/TopToolbar.jsx` | Adicionada prop `onAlignItems`; botões de alinhamento recebem `onClick` chamando `onAlignItems('left'|'right'|'top'|'bottom')` |
+| `src/App.jsx` | Novos estados `alignRequest`, `alignTokenRef`; handlers `handleAlignItems`, `handleEquipmentPointsUpdate`; prop `onAlignItems` em `<TopToolbar>`; props `alignRequest` e `onEquipmentPointsUpdate` em `<CadCanvas>` |
+| `src/components/CadCanvas.jsx` | Props `alignRequest` e `onEquipmentPointsUpdate`; `useEffect` de alinhamento; guard `fittedBackgroundImage` no início do rubber band; guard `RUBBER_BAND_MIN_DRAG` no render do `<Rect>` |
+
+### v1.0.17 — Alinhamento ao Centro e Ferramentas de Distribuição (Junho de 2026)
+
+Expande o grupo de alinhamento da toolbar com dois novos alinhamentos (centro vertical e horizontal) e dois novos botões de distribuição equidistante.
+
+#### 10.1 Novos Botões de Alinhamento
+
+| Botão | direction | Comportamento |
+|---|---|---|
+| Alinhar verticalmente | `'center-x'` | Centraliza todos os itens no eixo X médio do conjunto |
+| Alinhar horizontalmente | `'center-y'` | Centraliza todos os itens no eixo Y médio do conjunto |
+
+**Referência:**
+- `center-x`: `(min(minX) + max(maxX)) / 2` — posiciona o centro de cada item no centro horizontal do grupo
+- `center-y`: `(min(minY) + max(maxY)) / 2` — posiciona o centro de cada item no centro vertical do grupo
+
+#### 10.2 Ferramentas de Distribuição
+
+| Botão | direction | Comportamento |
+|---|---|---|
+| Espaçar verticalmente | `'distribute-y'` | Distribui os itens com espaço igual entre eles no eixo Y |
+| Espaçar horizontalmente | `'distribute-x'` | Distribui os itens com espaço igual entre eles no eixo X |
+
+**Regras de distribuição:**
+- Requer **3 ou mais itens** selecionados — com menos, a operação é ignorada
+- Os dois itens das extremidades (mais à esquerda/direita ou mais acima/abaixo) ficam fixos como âncoras
+- Os itens do meio são redistribuídos com o mesmo **espaço entre as bordas** adjacentes:
+  ```
+  gap = (leading_extremo_direito - trailing_extremo_esquerdo - soma_tamanhos_do_meio) / (n - 1)
+  ```
+- Para **polígonos/ambientes**: o "tamanho" é a largura (`distribute-x`) ou altura (`distribute-y`) do bounding box — o espaçamento é entre as bordas dos polígonos
+- Para **equipamentos** (ponto sem dimensão): `tamanho = 0`, o que resulta em distribuição igual entre os pontos
+
+#### 10.3 Ordem dos Botões na Toolbar
+
+Após esta versão, o grupo de alinhamento/distribuição tem 8 botões em sequência:
+
+| # | Botão | direction |
+|---|---|---|
+| 1 | Alinhar à esquerda | `'left'` |
+| 2 | Alinhar verticalmente (centro) | `'center-x'` |
+| 3 | Alinhar à direita | `'right'` |
+| 4 | Alinhar acima | `'top'` |
+| 5 | Alinhar horizontalmente (centro) | `'center-y'` |
+| 6 | Alinhar abaixo | `'bottom'` |
+| 7 | Espaçar verticalmente | `'distribute-y'` |
+| 8 | Espaçar horizontalmente | `'distribute-x'` |
+
+#### 10.4 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/components/TopToolbar.jsx` | Importados `alinhamentoHorizontal`, `alinhamentoVertical`, `espacarHorizontal`, `espacarVertical`; adicionados 4 novos `<IconButton>` no grupo de alinhamento |
+| `src/components/CadCanvas.jsx` | `useEffect` de alinhamento expandido: ramos `center-x`/`center-y` na lógica de alinhamento; ramo `distribute-x`/`distribute-y` com algoritmo de gap antes do ramo de alinhamento |
+| `src/assets/alinhar-horizontalmente.svg` | Novo ícone — seta dupla horizontal centralizada |
+| `src/assets/alinhar-verticalmente.svg` | Novo ícone — seta dupla vertical centralizada |
+| `src/assets/espaçar-horizontalmente.svg` | Novo ícone — seta dupla horizontal com linhas âncora nas extremidades |
+| `src/assets/espaçar-verticalmente.svg` | Novo ícone — seta dupla vertical com linhas âncora nas extremidades |
+
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.12*
+*Relatório atualizado em Junho de 2026 — v1.0.17*

@@ -1325,7 +1325,7 @@ body.is-dragging-overlay * {
   outline: none;
 }
 
-/* Modo wireframe: exibido quando zoom >= 500% e o equipamento tem desenho técnico */
+/* Modo wireframe: exibido quando zoom >= 200% e o equipamento tem desenho técnico */
 
 .cad-equipment-placement--wireframe {
   width: auto;

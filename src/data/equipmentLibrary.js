@@ -68,7 +68,7 @@ export const equipmentLibraryTabs = {
       label: 'Acionadores',
       icon: 'pasta',
       children: [
-        { id: 'amb-acionadores-1', label: 'Ventilador', icon: 'motores' },
+        { id: 'amb-acionadores-1', label: 'Ventilador', icon: 'ventiladores' },
         { id: 'amb-acionadores-2', label: 'Carga não dimerizável', icon: 'motores' },
         { id: 'amb-acionadores-3', label: 'Carga não dimerizável (Controle por relé)', icon: 'motores' },
       ],

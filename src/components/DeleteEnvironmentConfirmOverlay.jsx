@@ -1,7 +1,7 @@
 import avisoIcon from '../assets/aviso-44px.svg'
 import { useDraggable } from '../hooks/useDraggable.js'
 
-function DeleteEnvironmentConfirmOverlay({ onConfirm, onCancel }) {
+function DeleteEnvironmentConfirmOverlay({ onConfirm, onCancel, message = 'Deseja realmente apagar o ambiente?' }) {
   const { panelRef, panelStyle, onHandlePointerDown } = useDraggable()
 
   return (
@@ -21,7 +21,7 @@ function DeleteEnvironmentConfirmOverlay({ onConfirm, onCancel }) {
 
         <div className="cad-delete-confirm-overlay__content">
           <p className="cad-delete-confirm-overlay__text">
-            Deseja realmente apagar o ambiente?
+            {message}
           </p>
           <img
             src={avisoIcon}

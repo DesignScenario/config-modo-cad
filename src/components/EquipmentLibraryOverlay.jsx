@@ -33,6 +33,7 @@ import sensor from '../assets/sensor.svg'
 import sensores from '../assets/sensores.svg'
 import tw10 from '../assets/tw10.svg'
 import tw4 from '../assets/tw4.svg'
+import ventiladores from '../assets/ventilador.svg'
 import { equipmentLibraryTabs, getEquipmentFilterKeys } from '../data/equipmentLibrary.js'
 import { useDraggable } from '../hooks/useDraggable.js'
 
@@ -73,6 +74,7 @@ const ICON_MAP = {
   quadros,
   tw10,
   tw4,
+  ventiladores,
 }
 
 function collectIds(nodes, ids = []) {

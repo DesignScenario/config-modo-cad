@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import alinhamentoBase from '../assets/alinhamento-base.svg'
 import alinhamentoDireita from '../assets/alinhamento-direita.svg'
 import alinhamentoEsquerda from '../assets/alinhamento-esquerda.svg'
+import alinhamentoHorizontal from '../assets/alinhar-horizontalmente.svg'
 import alinhamentoTopo from '../assets/alinhamento-topo.svg'
+import alinhamentoVertical from '../assets/alinhar-verticalmente.svg'
+import espacarHorizontal from '../assets/espaçar-horizontalmente.svg'
+import espacarVertical from '../assets/espaçar-verticalmente.svg'
 import circulo from '../assets/círculo.svg'
 import excluir from '../assets/excluir.svg'
 import filtroCameras from '../assets/filtro-câmeras.svg'
@@ -82,6 +86,7 @@ function TopToolbar({
   onRotateImage,
   equipmentFilters,
   onToggleEquipmentFilter,
+  onAlignItems,
 }) {
   const [zoomInput, setZoomInput] = useState(String(zoom))
   const [opacityInput, setOpacityInput] = useState(String(opacity))
@@ -179,9 +184,9 @@ function TopToolbar({
             </IconButton>
 
             <IconButton
-              title="Círculo"
-              active={activeTool === 'circle'}
-              onClick={() => onToolChange('circle')}
+              title="Elipse"
+              active={activeTool === 'elipse'}
+              onClick={() => onToolChange('elipse')}
             >
               <img src={circulo} alt="" className="cad-icon-basic" />
             </IconButton>
@@ -209,17 +214,29 @@ function TopToolbar({
           <Divider />
 
           <div className="cad-toolbar-group cad-toolbar-group--tight">
-            <IconButton title="Alinhar à esquerda">
+            <IconButton title="Alinhar à esquerda" onClick={() => onAlignItems?.('left')}>
               <img src={alinhamentoEsquerda} alt="" className="cad-icon-basic" />
             </IconButton>
-            <IconButton title="Alinhar à direita">
+            <IconButton title="Alinhar verticalmente" onClick={() => onAlignItems?.('center-x')}>
+              <img src={alinhamentoVertical} alt="" className="cad-icon-basic" />
+            </IconButton>
+            <IconButton title="Alinhar à direita" onClick={() => onAlignItems?.('right')}>
               <img src={alinhamentoDireita} alt="" className="cad-icon-basic" />
             </IconButton>
-            <IconButton title="Alinhar acima">
+            <IconButton title="Alinhar acima" onClick={() => onAlignItems?.('top')}>
               <img src={alinhamentoTopo} alt="" className="cad-icon-basic" />
             </IconButton>
-            <IconButton title="Alinhar abaixo">
+            <IconButton title="Alinhar horizontalmente" onClick={() => onAlignItems?.('center-y')}>
+              <img src={alinhamentoHorizontal} alt="" className="cad-icon-basic" />
+            </IconButton>
+            <IconButton title="Alinhar abaixo" onClick={() => onAlignItems?.('bottom')}>
               <img src={alinhamentoBase} alt="" className="cad-icon-basic" />
+            </IconButton>
+            <IconButton title="Espaçar verticalmente" onClick={() => onAlignItems?.('distribute-y')}>
+              <img src={espacarVertical} alt="" className="cad-icon-basic" />
+            </IconButton>
+            <IconButton title="Espaçar horizontalmente" onClick={() => onAlignItems?.('distribute-x')}>
+              <img src={espacarHorizontal} alt="" className="cad-icon-basic" />
             </IconButton>
           </div>
 

@@ -262,6 +262,10 @@ function App() {
   const [renamingGenericNodeId, setRenamingGenericNodeId] = useState(null)
   const [polygonDeleteRequestId, setPolygonDeleteRequestId] = useState(null)
   const [pendingDeletePolygonId, setPendingDeletePolygonId] = useState(null)
+  const [pendingMultiDelete, setPendingMultiDelete] = useState(null)
+  const [multiDeletePolygonIds, setMultiDeletePolygonIds] = useState([])
+  const [alignRequest, setAlignRequest] = useState(null)
+  const alignTokenRef = useRef(0)
   const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
   const [pendingImportPavimentoId, setPendingImportPavimentoId] = useState(null)
   const [importedPlanPavimentoId, setImportedPlanPavimentoId] = useState(null)
@@ -1019,6 +1023,38 @@ function App() {
     setPendingDeletePolygonId(null)
   }
 
+  const handleMultiDeleteRequest = (polygonIds, equipmentIds) => {
+    if (!polygonIds.length && !equipmentIds.length) return
+    setPendingMultiDelete({ polygonIds, equipmentIds })
+  }
+
+  const handleConfirmMultiDelete = () => {
+    if (!pendingMultiDelete) return
+    const { polygonIds, equipmentIds } = pendingMultiDelete
+    polygonIds.forEach((polygonId) => handlePolygonDeleted(polygonId))
+    if (polygonIds.length) setMultiDeletePolygonIds([...polygonIds])
+    equipmentIds.forEach((equipmentId) => handleDeleteEquipment(equipmentId))
+    setPendingMultiDelete(null)
+  }
+
+  const handleCancelMultiDelete = () => {
+    setPendingMultiDelete(null)
+  }
+
+  const handleAlignItems = (direction) => {
+    alignTokenRef.current += 1
+    setAlignRequest({ direction, token: alignTokenRef.current })
+  }
+
+  const handleEquipmentPointsUpdate = (updates) => {
+    setPlacedEquipments((current) =>
+      current.map((equipment) => {
+        const update = updates.find((u) => u.id === equipment.id)
+        return update ? { ...equipment, point: update.point } : equipment
+      }),
+    )
+  }
+
   const handleEditEnvironmentRequest = (environmentId) => {
     const environment = environments.find((currentEnvironment) => currentEnvironment.id === environmentId)
 
@@ -1498,6 +1534,7 @@ function App() {
               onRotateImage={handleRotateImage}
               equipmentFilters={equipmentFilters}
               onToggleEquipmentFilter={handleToggleEquipmentFilter}
+              onAlignItems={handleAlignItems}
             />
             <div className="cad-canvas-area">
               <CadCanvas
@@ -1513,6 +1550,11 @@ function App() {
                 onPolygonCreated={handlePolygonCreated}
                 onPolygonDeleted={handlePolygonDeleted}
                 deletePolygonId={polygonDeleteRequestId}
+                deletePolygonIds={multiDeletePolygonIds}
+                onMultiDeleteRequest={handleMultiDeleteRequest}
+                alignRequest={alignRequest}
+                onEquipmentPointsUpdate={handleEquipmentPointsUpdate}
+                onAlignConsumed={() => setAlignRequest(null)}
                 focusPolygonRequest={polygonFocusRequest}
                 polygonColorById={polygonColorById}
                 polygonLabelById={polygonLabelById}
@@ -1674,6 +1716,29 @@ function App() {
                   onCancel={handleCancelDeletePolygon}
                 />
               ) : null}
+              {pendingMultiDelete ? (() => {
+                const { polygonIds, equipmentIds } = pendingMultiDelete
+                const total = polygonIds.length + equipmentIds.length
+                let message
+                if (polygonIds.length && equipmentIds.length) {
+                  message = `Deseja realmente apagar os ${total} itens selecionados?`
+                } else if (polygonIds.length > 1) {
+                  message = `Deseja realmente apagar os ${polygonIds.length} ambientes selecionados?`
+                } else if (polygonIds.length === 1) {
+                  message = 'Deseja realmente apagar o ambiente selecionado?'
+                } else if (equipmentIds.length > 1) {
+                  message = `Deseja realmente apagar os ${equipmentIds.length} equipamentos selecionados?`
+                } else {
+                  message = 'Deseja realmente apagar o equipamento selecionado?'
+                }
+                return (
+                  <DeleteEnvironmentConfirmOverlay
+                    message={message}
+                    onConfirm={handleConfirmMultiDelete}
+                    onCancel={handleCancelMultiDelete}
+                  />
+                )
+              })() : null}
               {equipmentPropertiesEquipment ? (
                 <EquipmentPropertiesOverlay
                   equipment={equipmentPropertiesEquipment}
