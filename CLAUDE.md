@@ -360,6 +360,37 @@ Onde `ceilingHeight` vem de `polygonCeilingHeightById[equipment.polygonId]` (str
 **Associação ambiente ↔ nó da árvore:**
 Nós `created-environment` podem ser arrastados para o overlay de ambiente (`application/x-env-node`). Ao concluir a associação, `updateNodeSource` atualiza o `source` do nó para `'created-environment'` no `projectTree`, e `handleFocusNodeFromTree` passa a reconhecer o nó como ambiente.
 
+### Desfazer / Refazer (Undo / Redo)
+
+Implementado via hook `src/hooks/useUndoRedo.js` com pilha dupla (undoStack / redoStack) limitada a **50 entradas**. O estado dos polygons do canvas é rastreado em paralelo em `App.jsx` para que o sync com CadCanvas seja completo.
+
+**Estados adicionados em `App.jsx`:**
+- `polygons` — `[{ id, points, color, label }]` — espelha a geometria dos polígonos do CadCanvas para inclusão no snapshot
+- `syncPolygons` — `{ polygons }` — prop passada ao CadCanvas; quando o objeto muda, um `useEffect` em CadCanvas substitui sua lista interna de polígonos
+
+**Snapshot** — capturado antes de cada mutação estrutural via `pushSnapshotMaybe()`:
+```js
+{ projectTree, environments, placedEquipments, placedCurtains,
+  automationBoards, avOrganizers, scaleDefinition, polygonColorById, polygons }
+```
+
+Estado **excluído** do snapshot (UI / viewport / efêmero): `activeTool`, `zoom`, `backgroundOpacity`, `importedImage`, `imageRotation`, overlays, seleção, renomeação em andamento.
+
+**`isBatchingRef`** — flag `useRef` que suprime snapshots durante operações que disparam múltiplos callbacks (alinhamento de N polígonos, exclusão em lote). `handleAlignItems` empurra **um único snapshot** e liga o flag; `handleAlignConsumed` desliga.
+
+**Atalhos de teclado:** `Ctrl+Z` → desfazer, `Ctrl+Y` / `Ctrl+Shift+Z` → refazer. Implementados com `useRef` para evitar closure stale.
+
+**Escala como ponto de partida:** `handleConcludeScale` chama `clearHistory()` após definir a escala — apaga todo o histórico anterior. Não há snapshot da escala em si; ela é o "início" intransponível do histórico.
+
+**Sincronização bidirecional com CadCanvas:**
+- `handlePolygonCreated` — não modifica `polygons` (polígono ainda está pendente de confirmação)
+- `handleConcludeEnvironment` — adiciona `{ id, points, color, label }` a `polygons` ao confirmar
+- `handlePolygonDeleted` — remove de `polygons`
+- `handlePolygonTranslated` — aceita `newPolygonPoints` e atualiza `polygons`; CadCanvas passa esse campo nos três locais que chamam `onPolygonTranslated` (drag, distribute-align, edge-align)
+- `handleCommitRename` (ambiente) e edição de ambiente — mantêm `label` e `color` de `polygons` sincronizados
+
+**Por que `color` e `label` são necessários no snapshot:** CadCanvas tem `useEffect`s que aplicam `polygonColorById` e `polygonLabelById` à sua lista interna de polígonos. Quando `syncPolygons` repõe os polígonos após undo/redo, esses efeitos já rodaram e não re-disparam. Se `color` fosse `undefined`, `hexToRgba(polygon.color, 0.25)` lançaria `TypeError`. A solução é armazenar o objeto completo no snapshot.
+
 ### Versionamento
 
 A versão da aplicação é injetada em tempo de build pelo Vite:
@@ -372,6 +403,11 @@ __APP_VERSION__ = `1.0.${git rev-list --count HEAD}`
 O valor é exibido no footer/statusbar como `1.0.X` onde `X` é o total de commits. `__APP_VERSION__` está declarado como global `readonly` no `eslint.config.js`.
 
 O número de versão incrementa **exclusivamente ao fazer um novo commit** — não por cada troca de mensagens no chat. O histórico de versões em `md/relatorio-modo-cad.md` deve registrar exatamente uma entrada por commit, com o número da versão correspondendo ao total de commits no momento do commit.
+
+**Deploy no Vercel:** o Vercel faz clone raso por padrão (shallow clone), o que faz `git rev-list --count HEAD` retornar um número errado. O `vercel.json` na raiz do projeto corrige isso executando `git fetch --unshallow` antes do build:
+```json
+{ "buildCommand": "git fetch --unshallow 2>/dev/null || true && npm run build" }
+```
 
 ### Padrão de overlays
 

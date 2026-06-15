@@ -7,6 +7,7 @@ import alinhamentoTopo from '../assets/alinhamento-topo.svg'
 import alinhamentoVertical from '../assets/alinhar-verticalmente.svg'
 import espacarHorizontal from '../assets/espaçar-horizontalmente.svg'
 import espacarVertical from '../assets/espaçar-verticalmente.svg'
+import desfazer from '../assets/desfazer.svg'
 import circulo from '../assets/círculo.svg'
 import excluir from '../assets/excluir.svg'
 import filtroCameras from '../assets/filtro-câmeras.svg'
@@ -23,6 +24,7 @@ import filtroTodosEquipamentos from '../assets/filtro-todos-equipamentos.svg'
 import filtroTouchPanels from '../assets/filtro-touchpanels.svg'
 import mover from '../assets/mover.svg'
 import poligono from '../assets/polígono.svg'
+import refazer from '../assets/refazer.svg'
 import regua from '../assets/regua.svg'
 import retangulo from '../assets/retângulo.svg'
 import rotacionarPlanta from '../assets/rotacionar-planta.svg'
@@ -48,7 +50,7 @@ function Divider() {
   return <div className="cad-toolbar-divider" aria-hidden="true" />
 }
 
-function IconButton({ title, active = false, pressed = active, onClick, children, className = '' }) {
+function IconButton({ title, active = false, pressed = active, onClick, children, className = '', disabled = false }) {
   return (
     <button
       type="button"
@@ -56,6 +58,7 @@ function IconButton({ title, active = false, pressed = active, onClick, children
       title={title}
       onClick={onClick}
       aria-pressed={pressed}
+      disabled={disabled}
     >
       {children}
     </button>
@@ -87,6 +90,10 @@ function TopToolbar({
   equipmentFilters,
   onToggleEquipmentFilter,
   onAlignItems,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }) {
   const [zoomInput, setZoomInput] = useState(String(zoom))
   const [opacityInput, setOpacityInput] = useState(String(opacity))
@@ -130,6 +137,26 @@ function TopToolbar({
       <div className="cad-toolbar__row cad-toolbar__row--primary">
         <div className="cad-toolbar-main">
           
+          <div className="cad-toolbar-group">
+            <IconButton
+              title="Desfazer (Ctrl+Z)"
+              disabled={!canUndo}
+              onClick={onUndo}
+            >
+              <img src={desfazer} alt="" className="cad-icon-basic" />
+            </IconButton>
+
+            <IconButton
+              title="Refazer (Ctrl+Y)"
+              disabled={!canRedo}
+              onClick={onRedo}
+            >
+              <img src={refazer} alt="" className="cad-icon-basic" />
+            </IconButton>
+          </div>
+
+          <Divider />
+
           <div className="cad-toolbar-group">
             <IconButton title="Rotacionar planta" onClick={onRotateImage}>
             <img src={rotacionarPlanta} alt="" className="cad-icon-basic" />

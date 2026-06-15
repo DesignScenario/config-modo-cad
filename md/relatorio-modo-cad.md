@@ -704,4 +704,56 @@ Ao inserir múltiplas luminárias via **Adição Múltipla**, um checkbox aparec
 
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.16*
+### v1.0.17 — Desfazer / Refazer (Undo / Redo) (Junho de 2026)
+
+Esta versão introduz o sistema completo de desfazer e refazer ações no canvas, com pilha dupla limitada a 50 entradas e a definição de escala como ponto de partida intransponível.
+
+#### 9.1 Comportamento
+
+| Ação | Resultado |
+|---|---|
+| `Ctrl+Z` / botão Desfazer | Desfaz a última ação estrutural; desabilitado quando não há histórico |
+| `Ctrl+Y` / `Ctrl+Shift+Z` / botão Refazer | Refaz a última ação desfeita; desabilitado quando não há nada a refazer |
+| Definir escala | Zera o histórico — a escala é o ponto de partida, não pode ser desfeita |
+| 50 ações acumuladas | Ação mais antiga é descartada (limite FIFO) |
+
+#### 9.2 Escopo do Snapshot
+
+O snapshot captura o estado estrutural do projeto imediatamente antes de cada mutação:
+
+| Incluso no snapshot | Excluído |
+|---|---|
+| `projectTree`, `environments`, `placedEquipments`, `placedCurtains` | `activeTool`, `zoom`, `backgroundOpacity`, `imageRotation` |
+| `automationBoards`, `avOrganizers`, `scaleDefinition`, `polygonColorById` | Overlays abertos, seleção ativa, renomeação em andamento |
+| `polygons` — geometria completa `{ id, points, color, label }` | |
+
+#### 9.3 Sincronização da Geometria de Polígonos
+
+A geometria dos polígonos vive em estado local de `CadCanvas.jsx`. Para que o undo restaure corretamente os polígonos do canvas (e não apenas a árvore/ambientes de `App.jsx`), foi implementada sincronização bidirecional:
+
+- `App.jsx` mantém `polygons: [{ id, points, color, label }]` em paralelo, atualizado em `handleConcludeEnvironment`, `handlePolygonDeleted`, `handlePolygonTranslated`, `handleCommitRename` e na edição de ambiente.
+- Ao restaurar um snapshot, `setSyncPolygons({ polygons })` dispara um `useEffect` em `CadCanvas` que substitui sua lista interna de polígonos.
+- `color` e `label` são obrigatórios no objeto armazenado: sem eles, o `useEffect` de `polygonColorById` não re-dispara após o sync e `hexToRgba(undefined, ...)` lança `TypeError`.
+- CadCanvas passa `newPolygonPoints` em todos os callbacks `onPolygonTranslated` (drag, alinhamento distribute, alinhamento de borda).
+
+#### 9.4 Batching para Operações Compostas
+
+Operações que disparam múltiplos callbacks (alinhamento de N polígonos, exclusão em lote) usam `isBatchingRef` para garantir que apenas **um** snapshot seja empurrado por operação lógica:
+
+- `handleAlignItems` empurra o snapshot e liga o flag antes de setar `alignRequest`.
+- `handleAlignConsumed` desliga o flag após o `useEffect` de alinhamento completar.
+- `handleConfirmMultiDelete` envolve os loops com o flag ligado/desligado.
+
+#### 9.5 Arquivos Criados / Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/hooks/useUndoRedo.js` | Novo — hook com `pushSnapshot`, `undo`, `redo`, `clearHistory`; pilhas por `useRef`; `canUndo`/`canRedo` por `useState` |
+| `src/App.jsx` | Estados `polygons`, `syncPolygons`; `captureSnapshot`, `restoreSnapshot`, `pushSnapshotMaybe`, `isBatchingRef`; `handleUndo/Redo` com atalhos de teclado (`useLayoutEffect` para evitar stale closure); `clearHistory` em `handleConcludeScale`; `pushSnapshotMaybe` em ~35 handlers; `setPolygons` em `handleConcludeEnvironment`, `handlePolygonDeleted`, `handlePolygonTranslated`, `handleCommitRename` e edição de ambiente; `syncPolygons` prop passada ao `CadCanvas` |
+| `src/components/CadCanvas.jsx` | Prop `syncPolygons`; `useEffect` que repõe `polygons` ao mudar; `newPolygonPoints` nos 3 locais de `onPolygonTranslated` (drag, distribute-align, edge-align) |
+| `src/components/TopToolbar.jsx` | Prop `disabled` no `IconButton`; botões Desfazer/Refazer recebem `disabled={!canUndo}` / `disabled={!canRedo}` e `onClick={onUndo/onRedo}` |
+| `vercel.json` | Novo — `buildCommand` com `git fetch --unshallow` para corrigir versão errada no Vercel (shallow clone retornava contagem incorreta de commits) |
+
+---
+
+*Relatório atualizado em Junho de 2026 — v1.0.17*

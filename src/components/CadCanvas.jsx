@@ -737,6 +737,7 @@ function CadCanvas({
   onEquipmentLabelRenameCommit,
   onCancelRename,
   onPolygonTranslated,
+  syncPolygons,
   automationBoards,
   selectedBoardId,
   renamingBoardId,
@@ -1608,6 +1609,7 @@ function CadCanvas({
         )
         onPolygonTranslated?.({
           polygonId: draggingPolygon.polygonId,
+          newPolygonPoints: draggingPolygon.initialPolygonPoints.map(shiftPoint),
           equipmentPoints: draggingPolygon.initialEquipmentPoints.map((equipment) => ({
             equipmentId: equipment.id,
             point: shiftPoint(equipment.point),
@@ -1712,6 +1714,11 @@ function CadCanvas({
   }, [deletePolygonIds])
 
   useEffect(() => {
+    if (!syncPolygons) return
+    setPolygons(syncPolygons.polygons)
+  }, [syncPolygons])
+
+  useEffect(() => {
     if (!alignRequest) return
     const { direction } = alignRequest
 
@@ -1775,11 +1782,13 @@ function CadCanvas({
             return { ...polygon, points: polygon.points.map((p) => ({ x: p.x + upd.dx, y: p.y + upd.dy })) }
           }))
           for (const { id: polygonId, dx, dy } of polygonUpdates) {
+            const polyRef = polygons.find((p) => p.id === polygonId)
             const eqInPoly = placedEquipments.filter((e) => e.polygonId === polygonId)
             const boardsInPoly = automationBoards.filter((b) => b.polygonId === polygonId)
             const orgsInPoly = avOrganizers.filter((o) => o.polygonId === polygonId)
             onPolygonTranslated?.({
               polygonId,
+              newPolygonPoints: polyRef ? polyRef.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) : undefined,
               equipmentPoints: eqInPoly.map((e) => ({ equipmentId: e.id, point: { x: e.point.x + dx, y: e.point.y + dy } })),
               boardPoints: boardsInPoly.map((b) => ({ boardId: b.id, point: { x: b.point.x + dx, y: b.point.y + dy } })),
               avOrganizerPoints: orgsInPoly.map((o) => ({ avOrganizerId: o.id, point: { x: o.point.x + dx, y: o.point.y + dy } })),
@@ -1838,11 +1847,13 @@ function CadCanvas({
 
       for (const { polygonId, dx, dy } of polygonDeltas) {
         if (!dx && !dy) continue
+        const polyRef = polygons.find((p) => p.id === polygonId)
         const eqInPoly = placedEquipments.filter((e) => e.polygonId === polygonId)
         const boardsInPoly = automationBoards.filter((b) => b.polygonId === polygonId)
         const orgsInPoly = avOrganizers.filter((o) => o.polygonId === polygonId)
         onPolygonTranslated?.({
           polygonId,
+          newPolygonPoints: polyRef ? polyRef.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) : undefined,
           equipmentPoints: eqInPoly.map((e) => ({ equipmentId: e.id, point: { x: e.point.x + dx, y: e.point.y + dy } })),
           boardPoints: boardsInPoly.map((b) => ({ boardId: b.id, point: { x: b.point.x + dx, y: b.point.y + dy } })),
           avOrganizerPoints: orgsInPoly.map((o) => ({ avOrganizerId: o.id, point: { x: o.point.x + dx, y: o.point.y + dy } })),
@@ -3953,7 +3964,7 @@ function CadCanvas({
               style={{ left: motorLeft, top: motorTop }}
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); onCurtainMotorFlip?.(curtain.id) }}
-              title="Trocar lado do motor"
+              title="Ponto elétrico"
             >
               <img src={motorIcon} alt="" className="cad-curtain-motor-icon" draggable={false} />
             </div>

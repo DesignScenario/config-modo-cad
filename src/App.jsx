@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useUndoRedo } from './hooks/useUndoRedo'
 import AppMenu from './components/AppMenu.jsx'
 import CadTaskbar from './components/CadTaskbar.jsx'
 import TopToolbar from './components/TopToolbar.jsx'
@@ -270,6 +271,8 @@ function App() {
   const [pendingDeletePolygonId, setPendingDeletePolygonId] = useState(null)
   const [pendingMultiDelete, setPendingMultiDelete] = useState(null)
   const [multiDeletePolygonIds, setMultiDeletePolygonIds] = useState([])
+  const [polygons, setPolygons] = useState([])
+  const [syncPolygons, setSyncPolygons] = useState(null)
   const [alignRequest, setAlignRequest] = useState(null)
   const alignTokenRef = useRef(0)
   const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
@@ -279,10 +282,63 @@ function App() {
   const importedImageUrlRef = useRef(null)
   const fileInputRef = useRef(null)
 
+  const { pushSnapshot, undo, redo, canUndo, canRedo, clearHistory } = useUndoRedo()
+  const isBatchingRef = useRef(false)
+
+  const captureSnapshot = () => ({
+    projectTree,
+    environments,
+    placedEquipments,
+    placedCurtains,
+    automationBoards,
+    avOrganizers,
+    scaleDefinition,
+    polygonColorById,
+    polygons,
+  })
+
+  const restoreSnapshot = (s) => {
+    setProjectTree(s.projectTree)
+    setEnvironments(s.environments)
+    setPlacedEquipments(s.placedEquipments)
+    setPlacedCurtains(s.placedCurtains)
+    setAutomationBoards(s.automationBoards)
+    setAvOrganizers(s.avOrganizers)
+    setScaleDefinition(s.scaleDefinition)
+    setPolygonColorById(s.polygonColorById)
+    setPolygons(s.polygons ?? [])
+    setSyncPolygons({ polygons: s.polygons ?? [] })
+  }
+
+  const pushSnapshotMaybe = () => {
+    if (!isBatchingRef.current) pushSnapshot(captureSnapshot())
+  }
+
+  const handleUndo = () => { const s = undo(captureSnapshot()); if (s) restoreSnapshot(s) }
+  const handleRedo = () => { const s = redo(captureSnapshot()); if (s) restoreSnapshot(s) }
+
+  const handleUndoRef = useRef(null)
+  const handleRedoRef = useRef(null)
+
+  useLayoutEffect(() => {
+    handleUndoRef.current = handleUndo
+    handleRedoRef.current = handleRedo
+  })
+
   const menuItems = useMemo(() => ['Arquivo', 'Preferências', 'Sistema'], [])
 
   const [taskbarExpanded, setTaskbarExpanded] = useState(false)
   const [toggleEstado, setToggleEstado] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndoRef.current() }
+      else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); handleRedoRef.current() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useEffect(() => {
     const handlePointerMove = (event) => {
@@ -434,6 +490,7 @@ function App() {
     }
     setActiveTool('select')
     setClearScaleReferenceToken((currentToken) => currentToken + 1)
+    clearHistory()
   }
 
   const handleCancelScaleValueOverlay = () => {
@@ -451,6 +508,8 @@ function App() {
   }
 
   const handlePolygonDeleted = (polygonId) => {
+    pushSnapshotMaybe()
+    setPolygons((curr) => curr.filter((p) => p.id !== polygonId))
     const env = environments.find((e) => e.polygonId === polygonId)
     const isDeletedEditingEnvironment = env?.id === editingEnvironmentId
     const removedEquipmentIds = placedEquipments
@@ -478,6 +537,7 @@ function App() {
   const handleCreateBoard = ({ polygonId, point, equipment, slotCount, columnCount }) => {
     const environment = environments.find((e) => e.polygonId === polygonId)
     if (!environment) return
+    pushSnapshotMaybe()
     const boardId = `board-${Date.now()}-${Math.round(Math.random() * 1000)}`
     const isDynamic = slotCount == null
     const newBoard = {
@@ -510,12 +570,14 @@ function App() {
   }
 
   const handleBoardPinToggle = (boardId) => {
+    pushSnapshotMaybe()
     setAutomationBoards((curr) =>
       curr.map((b) => (b.id === boardId ? { ...b, pinned: !b.pinned } : b)),
     )
   }
 
   const handleBoardSlotInstall = ({ boardId, slotIndex, device }) => {
+    pushSnapshotMaybe()
     setAutomationBoards((curr) =>
       curr.map((b) => {
         if (b.id !== boardId) return b
@@ -541,6 +603,7 @@ function App() {
   }
 
   const handleBoardSlotRemove = ({ boardId, slotIndex }) => {
+    pushSnapshotMaybe()
     const board = automationBoards.find((b) => b.id === boardId)
     const deviceId = board?.slots[slotIndex]?.id ?? null
     setAutomationBoards((curr) =>
@@ -562,6 +625,7 @@ function App() {
   }
 
   const handleDeleteBoard = (boardId) => {
+    pushSnapshotMaybe()
     setAutomationBoards((curr) => curr.filter((b) => b.id !== boardId))
     setProjectTree((curr) => removeNodeById(curr, boardId))
   }
@@ -569,6 +633,7 @@ function App() {
   const handleBoardEditRequest = (boardId) => setEditingBoardId(boardId)
 
   const handleBoardEditConfirm = (boardId, { columnCount }) => {
+    pushSnapshotMaybe()
     setAutomationBoards((curr) => curr.map((b) => (b.id === boardId ? { ...b, columnCount } : b)))
     setEditingBoardId(null)
   }
@@ -578,6 +643,7 @@ function App() {
     if (!nextEnvironment) return
     const board = automationBoards.find((b) => b.id === boardId)
     if (!board) return
+    pushSnapshotMaybe()
     const prevEnvironmentId = board.environmentId
     setAutomationBoards((curr) =>
       curr.map((b) => (b.id === boardId ? { ...b, point, polygonId, environmentId: nextEnvironment.id } : b)),
@@ -604,6 +670,7 @@ function App() {
   const handleCommitBoardLabelRename = (boardId, newName) => {
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
+      pushSnapshotMaybe()
       setAutomationBoards((curr) => curr.map((b) => (b.id === boardId ? { ...b, label: trimmed } : b)))
       setProjectTree((curr) => updateNodeLabel(curr, boardId, trimmed))
     }
@@ -614,6 +681,7 @@ function App() {
   const handleCreateAvOrganizer = ({ polygonId, point, equipment, columnCount }) => {
     const environment = environments.find((e) => e.polygonId === polygonId)
     if (!environment) return
+    pushSnapshotMaybe()
     const id = `av-org-${Date.now()}-${Math.round(Math.random() * 1000)}`
     setAvOrganizers((curr) => [...curr, {
       id,
@@ -643,6 +711,7 @@ function App() {
   }
 
   const handleDeleteAvOrganizer = (id) => {
+    pushSnapshotMaybe()
     setAvOrganizers((curr) => curr.filter((o) => o.id !== id))
     setProjectTree((curr) => removeNodeById(curr, id))
   }
@@ -650,15 +719,18 @@ function App() {
   const handleAvOrganizerEditRequest = (id) => setEditingAvOrganizerId(id)
 
   const handleAvOrganizerEditConfirm = (id, { columnCount }) => {
+    pushSnapshotMaybe()
     setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, columnCount } : o)))
     setEditingAvOrganizerId(null)
   }
 
   const handleAvOrganizerPinToggle = (id) => {
+    pushSnapshotMaybe()
     setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, pinned: !o.pinned } : o)))
   }
 
   const handleAvOrganizerSlotInstall = ({ organizerId, slotIndex, device }) => {
+    pushSnapshotMaybe()
     setAvOrganizers((curr) =>
       curr.map((o) => {
         if (o.id !== organizerId) return o
@@ -682,6 +754,7 @@ function App() {
   }
 
   const handleAvOrganizerSlotRemove = ({ organizerId, slotIndex }) => {
+    pushSnapshotMaybe()
     const organizer = avOrganizers.find((o) => o.id === organizerId)
     const deviceId = organizer?.slots[slotIndex]?.id ?? null
     setAvOrganizers((curr) =>
@@ -703,6 +776,7 @@ function App() {
     if (!nextEnvironment) return
     const organizer = avOrganizers.find((o) => o.id === organizerId)
     if (!organizer) return
+    pushSnapshotMaybe()
     const prevEnvironmentId = organizer.environmentId
     setAvOrganizers((curr) =>
       curr.map((o) => (o.id === organizerId ? { ...o, point, polygonId, environmentId: nextEnvironment.id } : o)),
@@ -729,6 +803,7 @@ function App() {
   const handleCommitAvOrganizerLabelRename = (id, newName) => {
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
+      pushSnapshotMaybe()
       setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, label: trimmed } : o)))
       setProjectTree((curr) => updateNodeLabel(curr, id, trimmed))
     }
@@ -786,6 +861,7 @@ function App() {
       return
     }
 
+    pushSnapshotMaybe()
     const equipmentId = `equip-${Date.now()}-${Math.round(Math.random() * 1000)}`
     const nextEquipment = {
       id: equipmentId,
@@ -815,6 +891,7 @@ function App() {
   const handleOcSensitivityConfirm = (sensitivity) => {
     const pending = pendingOcPlacement
     if (!pending) return
+    pushSnapshotMaybe()
     setPendingOcPlacement(null)
     const equipmentId = `equip-${Date.now()}-${Math.round(Math.random() * 1000)}`
     const nextEquipment = {
@@ -853,6 +930,7 @@ function App() {
   const handleOcSensitivityEditConfirm = (sensitivity) => {
     const pending = pendingOcPlacement
     if (!pending?._editId) { handleOcSensitivityConfirm(sensitivity); return }
+    pushSnapshotMaybe()
     setPlacedEquipments((curr) => curr.map((e) => e.id === pending._editId ? { ...e, ocSensitivity: sensitivity } : e))
     setPendingOcPlacement(null)
   }
@@ -860,6 +938,7 @@ function App() {
   const handleCurtainRectDrawn = ({ rectStart, rectEnd }) => {
     const pending = pendingCurtainEquipment
     if (!pending) return
+    pushSnapshotMaybe()
     const curtainId = `curtain-${Date.now()}-${Math.round(Math.random() * 1000)}`
     const newCurtain = {
       id: curtainId,
@@ -890,12 +969,14 @@ function App() {
   const handleCurtainCancel = () => setPendingCurtainEquipment(null)
 
   const handleCurtainMotorFlip = (curtainId) => {
+    pushSnapshotMaybe()
     setPlacedCurtains((curr) =>
       curr.map((c) => c.id === curtainId ? { ...c, motorSide: c.motorSide === 'a' ? 'b' : 'a' } : c),
     )
   }
 
   const handleCurtainMoved = ({ curtainId, rectStart, rectEnd }) => {
+    pushSnapshotMaybe()
     setPlacedCurtains((curr) =>
       curr.map((c) => c.id === curtainId ? { ...c, rectStart, rectEnd } : c),
     )
@@ -919,6 +1000,7 @@ function App() {
   const handleCurtainRenameCommit = (curtainId, newName) => {
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
+      pushSnapshotMaybe()
       setPlacedCurtains((curr) => curr.map((c) => c.id === curtainId ? { ...c, label: trimmed } : c))
       setProjectTree((curr) => updateNodeLabel(curr, curtainId, trimmed))
     }
@@ -926,6 +1008,7 @@ function App() {
   }
 
   const handleDeleteCurtain = (curtainId) => {
+    pushSnapshotMaybe()
     setPlacedCurtains((curr) => curr.filter((c) => c.id !== curtainId))
     setProjectTree((curr) => removeNodeById(curr, curtainId))
     setSelectedCurtainId((curr) => curr === curtainId ? null : curr)
@@ -958,6 +1041,7 @@ function App() {
       return
     }
 
+    pushSnapshotMaybe()
     const sameCircuit = Boolean(multiAddPlacementRequest?.sameCircuit)
     const circuitId = sameCircuit ? `circuit-${Date.now()}` : null
 
@@ -1006,6 +1090,7 @@ function App() {
       return
     }
 
+    pushSnapshotMaybe()
     setPlacedEquipments((currentEquipments) =>
       currentEquipments.map((equipment) => {
         if (equipment.id !== equipmentId) {
@@ -1039,9 +1124,16 @@ function App() {
     }
   }
 
-  const handlePolygonTranslated = ({ polygonId, equipmentPoints, boardPoints, avOrganizerPoints, curtainRects }) => {
+  const handlePolygonTranslated = ({ polygonId, newPolygonPoints, equipmentPoints, boardPoints, avOrganizerPoints, curtainRects }) => {
     if (!polygonId) return
 
+    pushSnapshotMaybe()
+
+    if (newPolygonPoints) {
+      setPolygons((curr) =>
+        curr.map((p) => (p.id === polygonId ? { ...p, points: newPolygonPoints } : p)),
+      )
+    }
     if (equipmentPoints?.length) {
       const translatedPointByEquipmentId = Object.fromEntries(
         equipmentPoints.map(({ equipmentId, point }) => [equipmentId, point]),
@@ -1096,6 +1188,7 @@ function App() {
   }
 
   const handleDeleteEquipment = (equipmentId) => {
+    pushSnapshotMaybe()
     const targetEquipment = placedEquipments.find((e) => e.id === equipmentId)
     const circuitId = targetEquipment?.circuitId
 
@@ -1209,9 +1302,12 @@ function App() {
   const handleConfirmMultiDelete = () => {
     if (!pendingMultiDelete) return
     const { polygonIds, equipmentIds } = pendingMultiDelete
+    pushSnapshot(captureSnapshot())
+    isBatchingRef.current = true
     polygonIds.forEach((polygonId) => handlePolygonDeleted(polygonId))
     if (polygonIds.length) setMultiDeletePolygonIds([...polygonIds])
     equipmentIds.forEach((equipmentId) => handleDeleteEquipment(equipmentId))
+    isBatchingRef.current = false
     setPendingMultiDelete(null)
   }
 
@@ -1220,11 +1316,19 @@ function App() {
   }
 
   const handleAlignItems = (direction) => {
+    pushSnapshot(captureSnapshot())
+    isBatchingRef.current = true
     alignTokenRef.current += 1
     setAlignRequest({ direction, token: alignTokenRef.current })
   }
 
+  const handleAlignConsumed = () => {
+    setAlignRequest(null)
+    isBatchingRef.current = false
+  }
+
   const handleEquipmentPointsUpdate = (updates) => {
+    pushSnapshotMaybe()
     setPlacedEquipments((current) =>
       current.map((equipment) => {
         const update = updates.find((u) => u.id === equipment.id)
@@ -1299,9 +1403,16 @@ function App() {
   const handleCommitRename = (environmentId, newName) => {
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
+      pushSnapshotMaybe()
+      const renamedEnv = environments.find((e) => e.id === environmentId)
       setEnvironments((curr) =>
         curr.map((e) => (e.id === environmentId ? { ...e, name: trimmed } : e)),
       )
+      if (renamedEnv?.polygonId) {
+        setPolygons((curr) =>
+          curr.map((p) => (p.id === renamedEnv.polygonId ? { ...p, label: trimmed } : p)),
+        )
+      }
       setProjectTree((curr) => updateNodeLabel(curr, environmentId, trimmed))
     }
     setRenamingEnvironmentId(null)
@@ -1311,6 +1422,7 @@ function App() {
   const handleCommitEquipmentRename = (equipmentId, newName) => {
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
+      pushSnapshotMaybe()
       const circuitId = placedEquipments.find((e) => e.id === equipmentId)?.circuitId
       if (circuitId) {
         const memberIds = new Set(placedEquipments.filter((e) => e.circuitId === circuitId).map((e) => e.id))
@@ -1411,6 +1523,7 @@ function App() {
     if (automationBoards.some((b) => b.id === nodeId)) {
       const trimmed = (newName ?? '').trim()
       if (trimmed) {
+        pushSnapshotMaybe()
         setAutomationBoards((curr) => curr.map((b) => (b.id === nodeId ? { ...b, label: trimmed } : b)))
         setProjectTree((curr) => updateNodeLabel(curr, nodeId, trimmed))
       }
@@ -1421,6 +1534,7 @@ function App() {
     if (avOrganizers.some((o) => o.id === nodeId)) {
       const trimmed = (newName ?? '').trim()
       if (trimmed) {
+        pushSnapshotMaybe()
         setAvOrganizers((curr) => curr.map((o) => (o.id === nodeId ? { ...o, label: trimmed } : o)))
         setProjectTree((curr) => updateNodeLabel(curr, nodeId, trimmed))
       }
@@ -1430,6 +1544,7 @@ function App() {
 
     const trimmed = (newName ?? '').trim()
     if (trimmed) {
+      pushSnapshotMaybe()
       setProjectTree((curr) => updateNodeLabel(curr, nodeId, trimmed))
     }
     setRenamingGenericNodeId(null)
@@ -1437,6 +1552,7 @@ function App() {
 
   const handleConcludeEnvironment = ({ name, environmentClass, ceilingHeight, associateEnvId, associateEnvName }) => {
     if (editingEnvironmentId) {
+      pushSnapshotMaybe()
       const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
 
       setEnvironments((currentEnvironments) =>
@@ -1459,6 +1575,9 @@ function App() {
           ...currentColors,
           [editedEnvironment.polygonId]: color,
         }))
+        setPolygons((curr) =>
+          curr.map((p) => (p.id === editedEnvironment.polygonId ? { ...p, color, label: name } : p)),
+        )
       }
 
       setDefaultCeilingHeight(ceilingHeight)
@@ -1472,10 +1591,12 @@ function App() {
       return
     }
 
+    pushSnapshotMaybe()
     // Associate an existing (unassociated) environment to the new polygon
     if (associateEnvId) {
       const color = ENVIRONMENT_CLASS_COLOR_MAP[environmentClass] ?? ENVIRONMENT_CLASS_COLOR_MAP['Não definida']
 
+      setPolygons((prev) => [...prev, { id: pendingEnvironmentPolygon.id, points: pendingEnvironmentPolygon.points, color, label: associateEnvName }])
       setEnvironments((currentEnvironments) => [
         ...currentEnvironments,
         {
@@ -1510,6 +1631,7 @@ function App() {
       color,
     }
 
+    setPolygons((prev) => [...prev, { id: pendingEnvironmentPolygon.id, points: pendingEnvironmentPolygon.points, color, label: name }])
     setEnvironments((currentEnvironments) => [...currentEnvironments, nextEnvironment])
     setDefaultCeilingHeight(ceilingHeight)
     setPolygonColorById((currentColors) => ({
@@ -1725,6 +1847,10 @@ function App() {
               equipmentFilters={equipmentFilters}
               onToggleEquipmentFilter={handleToggleEquipmentFilter}
               onAlignItems={handleAlignItems}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
             />
             <div className="cad-canvas-area">
               <CadCanvas
@@ -1744,7 +1870,7 @@ function App() {
                 onMultiDeleteRequest={handleMultiDeleteRequest}
                 alignRequest={alignRequest}
                 onEquipmentPointsUpdate={handleEquipmentPointsUpdate}
-                onAlignConsumed={() => setAlignRequest(null)}
+                onAlignConsumed={handleAlignConsumed}
                 focusPolygonRequest={polygonFocusRequest}
                 polygonColorById={polygonColorById}
                 polygonLabelById={polygonLabelById}
@@ -1759,6 +1885,7 @@ function App() {
                 onMultiAddPlacementCommit={handleMultiAddPlacementCommit}
                 onMultiAddPlacementCancel={() => setMultiAddPlacementRequest(null)}
                 onPolygonTranslated={handlePolygonTranslated}
+                syncPolygons={syncPolygons}
                 automationBoards={automationBoards}
                 selectedBoardId={selectedBoardId}
                 renamingBoardId={renamingBoardCanvasId}
