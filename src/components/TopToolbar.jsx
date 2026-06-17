@@ -90,6 +90,7 @@ function TopToolbar({
   equipmentFilters,
   onToggleEquipmentFilter,
   onAlignItems,
+  onDeleteSelected,
   onUndo,
   onRedo,
   canUndo,
@@ -230,12 +231,11 @@ function TopToolbar({
 
           <div className="cad-toolbar-group">
             <IconButton
-            title="Excluir Polígono"
-            active={activeTool === 'delete'}
-            onClick={() => onToolChange('delete')}
-          >
-            <img src={excluir} alt="" className="cad-icon-basic" />
-          </IconButton>
+              title="Excluir (Delete)"
+              onClick={onDeleteSelected}
+            >
+              <img src={excluir} alt="" className="cad-icon-basic" />
+            </IconButton>
           </div>
 
           <Divider />

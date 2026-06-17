@@ -1,5 +1,5 @@
 import { Circle, Ellipse, Group, Layer, Line, Rect, Stage, Text, Wedge, Image as KonvaImage } from 'react-konva'
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import apagarProjeto from '../assets/apagar-projeto.svg'
 import motorIcon from '../assets/motores.svg'
 import pinPadrao from '../assets/pin-padrão.svg'
@@ -699,6 +699,7 @@ function CadCanvas({
   deletePolygonId,
   deletePolygonIds,
   onMultiDeleteRequest,
+  deleteRequest,
   alignRequest,
   onEquipmentPointsUpdate,
   onAlignConsumed,
@@ -737,6 +738,7 @@ function CadCanvas({
   onEquipmentLabelRenameCommit,
   onCancelRename,
   onPolygonTranslated,
+  onMultiTranslated,
   syncPolygons,
   automationBoards,
   selectedBoardId,
@@ -811,6 +813,7 @@ function CadCanvas({
   const [multiSelectedEquipmentIds, setMultiSelectedEquipmentIds] = useState(new Set())
   const [draggingEquipment, setDraggingEquipment] = useState(null)
   const [draggingPolygon, setDraggingPolygon] = useState(null)
+  const [draggingMulti, setDraggingMulti] = useState(null)
   const [multiAddDraft, setMultiAddDraft] = useState(null)
   const [polygonContextMenu, setPolygonContextMenu] = useState(null)
   const [equipmentContextMenu, setEquipmentContextMenu] = useState(null)
@@ -1195,40 +1198,30 @@ function CadCanvas({
   }, [avOrganizers, renamingAvOrganizerId])
 
   // Sync editing value when rename starts from outside (tree click).
-  // Delete selected polygon on Delete/Backspace key (select tool only).
-  useEffect(() => {
-    if (activeTool !== 'select') return undefined
-
-    const handleKeyDown = (event) => {
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        const hasMultiSelection = multiSelectedPolygonIds.size > 0 || multiSelectedEquipmentIds.size > 0
-        if (hasMultiSelection) {
-          onMultiDeleteRequest?.([...multiSelectedPolygonIds], [...multiSelectedEquipmentIds])
-          setMultiSelectedPolygonIds(new Set())
-          setMultiSelectedEquipmentIds(new Set())
-          return
-        }
-
-        if (selectedEquipmentId && !renamingEquipmentId) {
-          onEquipmentDelete?.(selectedEquipmentId)
-          return
-        }
-
-        if (selectedCurtainId && !renamingCurtainId) {
-          onCurtainDelete?.(selectedCurtainId)
-          return
-        }
-
-        if (selectedPolygonId && !renamingPolygonId) {
-          onPolygonDeleteRequest?.(selectedPolygonId)
-        }
-      }
+  // Delete selected polygon on Delete key (select tool only).
+  const triggerDelete = useCallback(() => {
+    const hasMultiSelection = multiSelectedPolygonIds.size > 0 || multiSelectedEquipmentIds.size > 0
+    if (hasMultiSelection) {
+      onMultiDeleteRequest?.([...multiSelectedPolygonIds], [...multiSelectedEquipmentIds])
+      setMultiSelectedPolygonIds(new Set())
+      setMultiSelectedEquipmentIds(new Set())
+      return
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    if (selectedEquipmentId && !renamingEquipmentId) {
+      onEquipmentDelete?.(selectedEquipmentId)
+      return
+    }
+
+    if (selectedCurtainId && !renamingCurtainId) {
+      onCurtainDelete?.(selectedCurtainId)
+      return
+    }
+
+    if (selectedPolygonId && !renamingPolygonId) {
+      onPolygonDeleteRequest?.(selectedPolygonId)
+    }
   }, [
-    activeTool,
     multiSelectedPolygonIds,
     multiSelectedEquipmentIds,
     onMultiDeleteRequest,
@@ -1242,6 +1235,23 @@ function CadCanvas({
     onEquipmentDelete,
     onPolygonDeleteRequest,
   ])
+
+  useEffect(() => {
+    if (activeTool !== 'select') return undefined
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Delete') triggerDelete()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeTool, triggerDelete])
+
+  useEffect(() => {
+    if (!deleteRequest) return
+    triggerDelete()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteRequest])
 
   useEffect(() => {
     if (!rubberBand || !fittedBackgroundImage) return undefined
@@ -1641,6 +1651,100 @@ function CadCanvas({
       window.removeEventListener('pointerup', handlePointerUp)
     }
   }, [draggingPolygon, fittedBackgroundImage, onPolygonTranslated])
+
+  useEffect(() => {
+    if (!draggingMulti || !fittedBackgroundImage) return undefined
+
+    const handlePointerMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+
+      const containerRect = container.getBoundingClientRect()
+      const currentStagePoint = {
+        x: event.clientX - containerRect.left,
+        y: event.clientY - containerRect.top,
+      }
+      const stageDelta = {
+        x: currentStagePoint.x - draggingMulti.startStagePoint.x,
+        y: currentStagePoint.y - draggingMulti.startStagePoint.y,
+      }
+
+      setDraggingMulti((current) => (current ? { ...current, stageDelta } : null))
+
+      setPolygons((currentPolygons) =>
+        currentPolygons.map((polygon) => {
+          const pd = draggingMulti.polygons.find((p) => p.polygonId === polygon.id)
+          if (!pd) return polygon
+          return {
+            ...polygon,
+            points: pd.initialPolygonPoints.map((point) =>
+              stageToNorm(
+                {
+                  x: normToStage(point, fittedBackgroundImage).x + stageDelta.x,
+                  y: normToStage(point, fittedBackgroundImage).y + stageDelta.y,
+                },
+                fittedBackgroundImage,
+              ),
+            ),
+          }
+        }),
+      )
+    }
+
+    const handlePointerUp = () => {
+      if (!draggingMulti.stageDelta.x && !draggingMulti.stageDelta.y) {
+        setDraggingMulti(null)
+        return
+      }
+
+      const { stageDelta } = draggingMulti
+      const shiftPoint = (normPoint) => stageToNorm(
+        {
+          x: normToStage(normPoint, fittedBackgroundImage).x + stageDelta.x,
+          y: normToStage(normPoint, fittedBackgroundImage).y + stageDelta.y,
+        },
+        fittedBackgroundImage,
+      )
+
+      onMultiTranslated?.({
+        polygonTranslations: draggingMulti.polygons.map((pd) => ({
+          polygonId: pd.polygonId,
+          newPolygonPoints: pd.initialPolygonPoints.map(shiftPoint),
+          equipmentPoints: pd.initialEquipmentPoints.map((eq) => ({
+            equipmentId: eq.id,
+            point: shiftPoint(eq.point),
+          })),
+          boardPoints: pd.initialBoardPoints.map((board) => ({
+            boardId: board.id,
+            point: shiftPoint(board.point),
+          })),
+          avOrganizerPoints: pd.initialAvOrganizerPoints.map((org) => ({
+            avOrganizerId: org.id,
+            point: shiftPoint(org.point),
+          })),
+          curtainRects: pd.initialCurtainRects.map((c) => ({
+            curtainId: c.id,
+            rectStart: shiftPoint(c.rectStart),
+            rectEnd: shiftPoint(c.rectEnd),
+          })),
+        })),
+        looseEquipmentUpdates: draggingMulti.looseEquipments.map((eq) => ({
+          id: eq.id,
+          point: shiftPoint(eq.initialPoint),
+        })),
+      })
+
+      setDraggingMulti(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggingMulti, fittedBackgroundImage, onMultiTranslated])
 
   useEffect(() => {
     if (!isMiddlePanning) {
@@ -2141,6 +2245,42 @@ function CadCanvas({
     return true
   }
 
+  const buildMultiDragState = (stagePoint) => {
+    const polyData = [...multiSelectedPolygonIds].map((pid) => {
+      const polygon = polygons.find((p) => p.id === pid)
+      if (!polygon) return null
+      return {
+        polygonId: pid,
+        initialPolygonPoints: polygon.points,
+        initialEquipmentPoints: (placedEquipments ?? [])
+          .filter((eq) => eq.polygonId === pid)
+          .map((eq) => ({ id: eq.id, point: eq.point })),
+        initialBoardPoints: (automationBoards ?? [])
+          .filter((b) => b.polygonId === pid)
+          .map((b) => ({ id: b.id, point: b.point })),
+        initialAvOrganizerPoints: (avOrganizers ?? [])
+          .filter((org) => org.polygonId === pid)
+          .map((org) => ({ id: org.id, point: org.point })),
+        initialCurtainRects: (placedCurtains ?? [])
+          .filter((c) => c.polygonId === pid)
+          .map((c) => ({ id: c.id, rectStart: c.rectStart, rectEnd: c.rectEnd })),
+      }
+    }).filter(Boolean)
+
+    const looseEquipments = [...multiSelectedEquipmentIds]
+      .map((eid) => (placedEquipments ?? []).find((eq) => eq.id === eid))
+      .filter(Boolean)
+      .filter((eq) => !multiSelectedPolygonIds.has(eq.polygonId))
+      .map((eq) => ({ id: eq.id, initialPoint: { ...eq.point } }))
+
+    return {
+      startStagePoint: stagePoint,
+      stageDelta: { x: 0, y: 0 },
+      polygons: polyData,
+      looseEquipments,
+    }
+  }
+
   const handlePolygonMouseDown = (event, polygonId) => {
     if (tryHandleMultiAddClick(polygonId)) {
       event.cancelBubble = true
@@ -2161,6 +2301,13 @@ function CadCanvas({
         else next.add(polygonId)
         return next
       })
+      return
+    }
+
+    // Multi-drag: clicked polygon is part of an active multi-selection
+    if (multiSelectedPolygonIds.has(polygonId) && event.evt.button === 0) {
+      const stagePoint = toStagePoint(stageRef.current)
+      if (stagePoint) setDraggingMulti(buildMultiDragState(stagePoint))
       return
     }
 
@@ -2227,6 +2374,15 @@ function CadCanvas({
     })
   }
 
+  const getPolygonDragData = (polygonId) => {
+    if (draggingPolygon?.polygonId === polygonId) return draggingPolygon
+    if (draggingMulti) {
+      const pd = draggingMulti.polygons.find((p) => p.polygonId === polygonId)
+      if (pd) return { ...pd, stageDelta: draggingMulti.stageDelta }
+    }
+    return null
+  }
+
   const getEquipmentDragPoint = (eq) => {
     if (draggingEquipment?.id === eq.id) return draggingEquipment.point
     if (draggingEquipment?.circuitMembers) {
@@ -2236,6 +2392,18 @@ function CadCanvas({
           x: member.initialPoint.x + (draggingEquipment.point.x - draggingEquipment.initialAnchorPoint.x),
           y: member.initialPoint.y + (draggingEquipment.point.y - draggingEquipment.initialAnchorPoint.y),
         }
+      }
+    }
+    if (draggingMulti && fittedBackgroundImage) {
+      const looseEq = draggingMulti.looseEquipments.find((le) => le.id === eq.id)
+      if (looseEq) {
+        return stageToNorm(
+          {
+            x: normToStage(looseEq.initialPoint, fittedBackgroundImage).x + draggingMulti.stageDelta.x,
+            y: normToStage(looseEq.initialPoint, fittedBackgroundImage).y + draggingMulti.stageDelta.y,
+          },
+          fittedBackgroundImage,
+        )
       }
     }
     return eq.point
@@ -2303,6 +2471,19 @@ function CadCanvas({
         else next.add(equipment.id)
         return next
       })
+      return
+    }
+
+    // Multi-drag: clicked equipment is part of an active multi-selection
+    if (multiSelectedEquipmentIds.has(equipment.id)) {
+      const container = containerRef.current
+      if (!container) return
+      const containerRect = container.getBoundingClientRect()
+      const stagePoint = { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }
+      equipmentHoldTimerRef.current = window.setTimeout(() => {
+        setDraggingMulti(buildMultiDragState(stagePoint))
+        equipmentHoldTimerRef.current = null
+      }, EQUIPMENT_HOLD_TO_DRAG_MS)
       return
     }
 
@@ -2972,8 +3153,9 @@ function CadCanvas({
                 const points = members.flatMap((eq) => {
                   const normPoint = getEquipmentDragPoint(eq)
                   const base = normToStage(normPoint, fittedBackgroundImage)
-                  const stagePoint = draggingPolygon?.polygonId === eq.polygonId
-                    ? { x: base.x + (draggingPolygon.stageDelta?.x ?? 0), y: base.y + (draggingPolygon.stageDelta?.y ?? 0) }
+                  const _polyDrag = getPolygonDragData(eq.polygonId)
+                  const stagePoint = _polyDrag
+                    ? { x: base.x + (_polyDrag.stageDelta?.x ?? 0), y: base.y + (_polyDrag.stageDelta?.y ?? 0) }
                     : base
                   return [stagePoint.x, stagePoint.y]
                 })
@@ -3004,10 +3186,11 @@ function CadCanvas({
                 const radiusPixels = ceilingHeight * Math.tan(SENSOR_OPENING_ANGLE_HALF_RAD) * stagePixelsPerMeter
                 const sensorNormPoint = getEquipmentDragPoint(equipment)
                 const sensorBaseStage = normToStage(sensorNormPoint, fittedBackgroundImage)
-                const sensorStage = draggingPolygon?.polygonId === equipment.polygonId
+                const _sensorPolyDrag = getPolygonDragData(equipment.polygonId)
+                const sensorStage = _sensorPolyDrag
                   ? {
-                      x: sensorBaseStage.x + (draggingPolygon.stageDelta?.x ?? 0),
-                      y: sensorBaseStage.y + (draggingPolygon.stageDelta?.y ?? 0),
+                      x: sensorBaseStage.x + (_sensorPolyDrag.stageDelta?.x ?? 0),
+                      y: sensorBaseStage.y + (_sensorPolyDrag.stageDelta?.y ?? 0),
                     }
                   : sensorBaseStage
                 const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
@@ -3054,16 +3237,12 @@ function CadCanvas({
                 const radiusPixels = PIR_RADIUS_METERS * stagePixelsPerMeter
                 const normPoint = getEquipmentDragPoint(equipment)
                 const baseStage = normToStage(normPoint, fittedBackgroundImage)
-                const stagePoint = draggingPolygon?.polygonId === equipment.polygonId
-                  ? { x: baseStage.x + (draggingPolygon.stageDelta?.x ?? 0), y: baseStage.y + (draggingPolygon.stageDelta?.y ?? 0) }
+                const _pirPolyDrag = getPolygonDragData(equipment.polygonId)
+                const stagePoint = _pirPolyDrag
+                  ? { x: baseStage.x + (_pirPolyDrag.stageDelta?.x ?? 0), y: baseStage.y + (_pirPolyDrag.stageDelta?.y ?? 0) }
                   : baseStage
                 const wallAngleDeg = Math.atan2(wn.y, wn.x) * (180 / Math.PI)
-                const polyStagePoints = polygon.points.map((p) => {
-                  const sp = normToStage(p, fittedBackgroundImage)
-                  return draggingPolygon?.polygonId === polygon.id
-                    ? { x: sp.x + (draggingPolygon.stageDelta?.x ?? 0), y: sp.y + (draggingPolygon.stageDelta?.y ?? 0) }
-                    : sp
-                })
+                const polyStagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
                 return (
                   <Group
                     key={`pir-${equipment.id}`}
@@ -3109,16 +3288,12 @@ function CadCanvas({
                 const radiusYPx = (dims.depthM / 2) * stagePixelsPerMeter
                 const normPoint = getEquipmentDragPoint(equipment)
                 const baseStage = normToStage(normPoint, fittedBackgroundImage)
-                const stagePoint = draggingPolygon?.polygonId === equipment.polygonId
-                  ? { x: baseStage.x + (draggingPolygon.stageDelta?.x ?? 0), y: baseStage.y + (draggingPolygon.stageDelta?.y ?? 0) }
+                const _ocPolyDrag = getPolygonDragData(equipment.polygonId)
+                const stagePoint = _ocPolyDrag
+                  ? { x: baseStage.x + (_ocPolyDrag.stageDelta?.x ?? 0), y: baseStage.y + (_ocPolyDrag.stageDelta?.y ?? 0) }
                   : baseStage
                 const wallAngleDeg = Math.atan2(wn.y, wn.x) * (180 / Math.PI)
-                const polyStagePoints = polygon.points.map((p) => {
-                  const sp = normToStage(p, fittedBackgroundImage)
-                  return draggingPolygon?.polygonId === polygon.id
-                    ? { x: sp.x + (draggingPolygon.stageDelta?.x ?? 0), y: sp.y + (draggingPolygon.stageDelta?.y ?? 0) }
-                    : sp
-                })
+                const polyStagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
                 return (
                   <Group
                     key={`oc-${equipment.id}`}
@@ -3422,13 +3597,14 @@ function CadCanvas({
         const visiblePoint = (() => {
           const _dragPoint = getEquipmentDragPoint(equipment)
           if (_dragPoint !== equipment.point) return _dragPoint
-          if (draggingPolygon?.polygonId === equipment.polygonId) {
-            const initial = draggingPolygon.initialEquipmentPoints?.find((e) => e.id === equipment.id)
+          const _eqPolyDrag = getPolygonDragData(equipment.polygonId)
+          if (_eqPolyDrag) {
+            const initial = _eqPolyDrag.initialEquipmentPoints?.find((e) => e.id === equipment.id)
             if (initial) {
               return stageToNorm(
                 {
-                  x: normToStage(initial.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
-                  y: normToStage(initial.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+                  x: normToStage(initial.point, fittedBackgroundImage).x + _eqPolyDrag.stageDelta.x,
+                  y: normToStage(initial.point, fittedBackgroundImage).y + _eqPolyDrag.stageDelta.y,
                 },
                 fittedBackgroundImage,
               )
@@ -3516,13 +3692,14 @@ function CadCanvas({
         if (!isEquipmentIconVisible(board, equipmentFilters)) return null
         const visiblePoint = (() => {
           if (draggingBoard?.id === board.id) return draggingBoard.point
-          if (draggingPolygon?.polygonId === board.polygonId) {
-            const initial = draggingPolygon.initialBoardPoints?.find((b) => b.id === board.id)
+          const _boardPolyDrag = getPolygonDragData(board.polygonId)
+          if (_boardPolyDrag) {
+            const initial = _boardPolyDrag.initialBoardPoints?.find((b) => b.id === board.id)
             if (initial) {
               return stageToNorm(
                 {
-                  x: normToStage(initial.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
-                  y: normToStage(initial.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+                  x: normToStage(initial.point, fittedBackgroundImage).x + _boardPolyDrag.stageDelta.x,
+                  y: normToStage(initial.point, fittedBackgroundImage).y + _boardPolyDrag.stageDelta.y,
                 },
                 fittedBackgroundImage,
               )
@@ -3666,13 +3843,14 @@ function CadCanvas({
         if (!isEquipmentIconVisible(org, equipmentFilters)) return null
         const visiblePoint = (() => {
           if (draggingAvOrganizer?.id === org.id) return draggingAvOrganizer.point
-          if (draggingPolygon?.polygonId === org.polygonId) {
-            const initial = draggingPolygon.initialAvOrganizerPoints?.find((o) => o.id === org.id)
+          const _orgPolyDrag = getPolygonDragData(org.polygonId)
+          if (_orgPolyDrag) {
+            const initial = _orgPolyDrag.initialAvOrganizerPoints?.find((o) => o.id === org.id)
             if (initial) {
               return stageToNorm(
                 {
-                  x: normToStage(initial.point, fittedBackgroundImage).x + draggingPolygon.stageDelta.x,
-                  y: normToStage(initial.point, fittedBackgroundImage).y + draggingPolygon.stageDelta.y,
+                  x: normToStage(initial.point, fittedBackgroundImage).x + _orgPolyDrag.stageDelta.x,
+                  y: normToStage(initial.point, fittedBackgroundImage).y + _orgPolyDrag.stageDelta.y,
                 },
                 fittedBackgroundImage,
               )
@@ -3807,7 +3985,7 @@ function CadCanvas({
 
       {fittedBackgroundImage ? (placedCurtains ?? []).filter((c) => isEquipmentIconVisible(c, equipmentFilters)).map((curtain) => {
         const isDragging = draggingCurtain?.id === curtain.id
-        const isPolygonDragging = draggingPolygon?.polygonId === curtain.polygonId
+        const _curtainPolyDrag = getPolygonDragData(curtain.polygonId)
 
         let rectStart = curtain.rectStart
         let rectEnd = curtain.rectEnd
@@ -3815,10 +3993,10 @@ function CadCanvas({
         if (isDragging && draggingCurtain.currentStart) {
           rectStart = draggingCurtain.currentStart
           rectEnd = draggingCurtain.currentEnd
-        } else if (isPolygonDragging) {
-          const initial = draggingPolygon.initialCurtainRects?.find((c) => c.id === curtain.id)
+        } else if (_curtainPolyDrag) {
+          const initial = _curtainPolyDrag.initialCurtainRects?.find((c) => c.id === curtain.id)
           if (initial) {
-            const delta = draggingPolygon.stageDelta
+            const delta = _curtainPolyDrag.stageDelta
             rectStart = stageToNorm(
               { x: normToStage(initial.rectStart, fittedBackgroundImage).x + delta.x, y: normToStage(initial.rectStart, fittedBackgroundImage).y + delta.y },
               fittedBackgroundImage,

@@ -376,7 +376,10 @@ Implementado via hook `src/hooks/useUndoRedo.js` com pilha dupla (undoStack / re
 
 Estado **excluído** do snapshot (UI / viewport / efêmero): `activeTool`, `zoom`, `backgroundOpacity`, `importedImage`, `imageRotation`, overlays, seleção, renomeação em andamento.
 
-**`isBatchingRef`** — flag `useRef` que suprime snapshots durante operações que disparam múltiplos callbacks (alinhamento de N polígonos, exclusão em lote). `handleAlignItems` empurra **um único snapshot** e liga o flag; `handleAlignConsumed` desliga.
+**`isBatchingRef`** — flag `useRef` que suprime snapshots durante operações que disparam múltiplos callbacks (alinhamento de N polígonos, exclusão em lote, arraste de seleção múltipla). Padrão usado nos três contextos:
+- `handleAlignItems` — empurra snapshot, liga o flag, seta `alignRequest`; `handleAlignConsumed` desliga
+- `handleConfirmMultiDelete` — empurra snapshot, liga o flag, itera exclusões, desliga
+- `handleMultiTranslated` — empurra snapshot, liga o flag, itera `handlePolygonTranslated` + `handleEquipmentPointsUpdate`, desliga
 
 **Atalhos de teclado:** `Ctrl+Z` → desfazer, `Ctrl+Y` / `Ctrl+Shift+Z` → refazer. Implementados com `useRef` para evitar closure stale.
 
@@ -416,6 +419,10 @@ Os overlays modais são componentes `<div>` posicionados renderizados condiciona
 ### Ferramentas ativas
 
 `activeTool` alterna entre: `select` | `polygon` | `ruler` | `rectangle` | `elipse` | `triangle` | `move`. O estado da ferramenta determina o comportamento dos eventos de clique/arraste no canvas e quais botões da toolbar ficam ativos.
+
+**Botão "Excluir" da toolbar:** chama `onDeleteSelected` → `handleDeleteSelected` em `App.jsx`, que incrementa `deleteTokenRef` e seta `deleteRequest = { token }`. `CadCanvas` tem um `useEffect` em `[deleteRequest]` que chama `triggerDelete()`. Isso permite que o botão da toolbar dispare a exclusão mesmo quando o foco não está no canvas. A mesma `triggerDelete` (`useCallback`) é usada pelo atalho de teclado `Delete`. O mesmo padrão de token é usado para `alignRequest`.
+
+**Cancelar overlay de valor de escala (`handleCancelScaleValueOverlay`):** retorna à ferramenta `polygon` com `setIsAwaitingScaleLine(true)`, para que o usuário possa desenhar uma nova linha de referência imediatamente sem reiniciar o fluxo. Antes, voltava para `select`, interrompendo o processo.
 
 As ferramentas de forma (`SHAPE_DRAW_TOOLS = new Set(['rectangle', 'elipse', 'triangle'])`) seguem o mesmo padrão de 2 cliques:
 - Clique 1: define `shapeDraftStart` (ponto inicial, coords normalizadas)
@@ -459,8 +466,8 @@ const [multiSelectedEquipmentIds, setMultiSelectedEquipmentIds] = useState(new S
 - Equipamento selecionado: `selectedEquipmentId === equipment.id || multiSelectedEquipmentIds.has(equipment.id)`
 - A seleção múltipla é zerada ao mudar de ferramenta ou ao clicar em área vazia sem Shift
 
-**Exclusão em lote (Delete/Backspace):**
-- Quando há multi-seleção ativa, `Delete`/`Backspace` dispara `onMultiDeleteRequest([...polygonIds], [...equipmentIds])` em vez da exclusão individual
+**Exclusão em lote (tecla `Delete` ou botão da toolbar):**
+- Quando há multi-seleção ativa, `Delete` (ou o botão "Excluir" via `deleteRequest`) dispara `onMultiDeleteRequest([...polygonIds], [...equipmentIds])` em vez da exclusão individual
 - CadCanvas limpa imediatamente `multiSelectedPolygonIds` e `multiSelectedEquipmentIds` após disparar o request
 - App.jsx armazena em `pendingMultiDelete` e exibe `DeleteEnvironmentConfirmOverlay` com mensagem contextual:
   - Só equipamentos: "Deseja realmente apagar os N equipamentos selecionados?"
@@ -514,6 +521,63 @@ Os botões de alinhamento/distribuição da toolbar operam sobre a seleção mú
 - **Equipamento dentro de polígono selecionado**: ignorado — move com o polígono automaticamente
 
 `onEquipmentPointsUpdate(updates)` em `App.jsx` faz um `setPlacedEquipments` direto sem alterar o `polygonId` ou a árvore.
+
+### Arrastar Seleção Múltipla
+
+Quando há uma seleção múltipla ativa e o usuário arrasta qualquer item selecionado, todos os itens da seleção se movem juntos.
+
+**Estado** em `CadCanvas.jsx`:
+```js
+const [draggingMulti, setDraggingMulti] = useState(null)
+```
+
+**Estrutura `draggingMulti`:**
+```js
+{
+  startStagePoint: {x, y},     // ponto de início em coords de stage
+  stageDelta: {x, y},          // deslocamento acumulado (atualizado a cada pointermove)
+  polygons: [{                 // dados iniciais de cada polígono selecionado
+    polygonId,
+    initialPolygonPoints,
+    initialEquipmentPoints:     [{id, point}],
+    initialBoardPoints:         [{id, point}],
+    initialAvOrganizerPoints:   [{id, point}],
+    initialCurtainRects:        [{id, rectStart, rectEnd}],
+  }],
+  looseEquipments: [{id, initialPoint}],  // equipamentos selecionados cujo polygonId NÃO está na seleção
+}
+```
+
+**Ativação:**
+- **Polígono em `multiSelectedPolygonIds`**: `handlePolygonMouseDown` ativa `draggingMulti` imediatamente (sem hold timer)
+- **Equipamento em `multiSelectedEquipmentIds`**: `handleEquipmentMouseDown` ativa `draggingMulti` após `EQUIPMENT_HOLD_TO_DRAG_MS` via hold timer
+
+**`buildMultiDragState(stagePoint)`** — helper em `CadCanvas.jsx` que captura o estado inicial de todos os itens selecionados e retorna o objeto `draggingMulti`.
+
+**Live rendering:** `useEffect([draggingMulti])` atualiza `stageDelta` e chama `setPolygons` com as novas posições de todos os polígonos selecionados a cada `pointermove` — mesmo padrão do drag individual.
+
+**Commit (`pointerup`):** chama `onMultiTranslated({ polygonTranslations, looseEquipmentUpdates })` e limpa `draggingMulti`.
+
+**`handleMultiTranslated` em `App.jsx`:** usa o padrão `isBatchingRef` — empurra **um único snapshot** antes, itera sobre `polygonTranslations` chamando `handlePolygonTranslated`, aplica `looseEquipmentUpdates` via `handleEquipmentPointsUpdate`, desliga o batching.
+
+**`getPolygonDragData(polygonId)`** — helper em `CadCanvas.jsx` que unifica a verificação de drag single e multi:
+```js
+const getPolygonDragData = (polygonId) => {
+  if (draggingPolygon?.polygonId === polygonId) return draggingPolygon
+  if (draggingMulti) {
+    const pd = draggingMulti.polygons.find((p) => p.polygonId === polygonId)
+    if (pd) return { ...pd, stageDelta: draggingMulti.stageDelta }
+  }
+  return null
+}
+```
+Substituiu todas as verificações `draggingPolygon?.polygonId === x.polygonId` em 8+ paths de rendering (circuit line, sensores, equipamentos, boards, organizadores AV, cortinas).
+
+**Importante — `polyStagePoints` em sensores PIR/OC:** como `polygon.points` já é atualizado em tempo real via `setPolygons` durante qualquer drag de polígono, a região de clip **não deve** receber delta adicional. O correto é:
+```js
+const polyStagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+```
+Aplicar `stageDelta` aqui causaria duplo deslocamento (double-delta bug).
 
 ### Convenções de nomenclatura
 

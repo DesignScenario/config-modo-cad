@@ -275,6 +275,8 @@ function App() {
   const [syncPolygons, setSyncPolygons] = useState(null)
   const [alignRequest, setAlignRequest] = useState(null)
   const alignTokenRef = useRef(0)
+  const [deleteRequest, setDeleteRequest] = useState(null)
+  const deleteTokenRef = useRef(0)
   const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
   const [pendingImportPavimentoId, setPendingImportPavimentoId] = useState(null)
   const [importedPlanPavimentoId, setImportedPlanPavimentoId] = useState(null)
@@ -496,7 +498,8 @@ function App() {
   const handleCancelScaleValueOverlay = () => {
     setShowScaleValueOverlay(false)
     setPendingScaleSegment(null)
-    setActiveTool('select')
+    setActiveTool('polygon')
+    setIsAwaitingScaleLine(true)
     setClearScaleReferenceToken((currentToken) => currentToken + 1)
   }
 
@@ -1315,6 +1318,11 @@ function App() {
     setPendingMultiDelete(null)
   }
 
+  const handleDeleteSelected = () => {
+    deleteTokenRef.current += 1
+    setDeleteRequest({ token: deleteTokenRef.current })
+  }
+
   const handleAlignItems = (direction) => {
     pushSnapshot(captureSnapshot())
     isBatchingRef.current = true
@@ -1335,6 +1343,18 @@ function App() {
         return update ? { ...equipment, point: update.point } : equipment
       }),
     )
+  }
+
+  const handleMultiTranslated = ({ polygonTranslations, looseEquipmentUpdates }) => {
+    pushSnapshot(captureSnapshot())
+    isBatchingRef.current = true
+    for (const translation of polygonTranslations) {
+      handlePolygonTranslated(translation)
+    }
+    if (looseEquipmentUpdates?.length) {
+      handleEquipmentPointsUpdate(looseEquipmentUpdates)
+    }
+    isBatchingRef.current = false
   }
 
   const handleEditEnvironmentRequest = (environmentId) => {
@@ -1847,6 +1867,7 @@ function App() {
               equipmentFilters={equipmentFilters}
               onToggleEquipmentFilter={handleToggleEquipmentFilter}
               onAlignItems={handleAlignItems}
+              onDeleteSelected={handleDeleteSelected}
               onUndo={handleUndo}
               onRedo={handleRedo}
               canUndo={canUndo}
@@ -1868,6 +1889,7 @@ function App() {
                 deletePolygonId={polygonDeleteRequestId}
                 deletePolygonIds={multiDeletePolygonIds}
                 onMultiDeleteRequest={handleMultiDeleteRequest}
+                deleteRequest={deleteRequest}
                 alignRequest={alignRequest}
                 onEquipmentPointsUpdate={handleEquipmentPointsUpdate}
                 onAlignConsumed={handleAlignConsumed}
@@ -1885,6 +1907,7 @@ function App() {
                 onMultiAddPlacementCommit={handleMultiAddPlacementCommit}
                 onMultiAddPlacementCancel={() => setMultiAddPlacementRequest(null)}
                 onPolygonTranslated={handlePolygonTranslated}
+                onMultiTranslated={handleMultiTranslated}
                 syncPolygons={syncPolygons}
                 automationBoards={automationBoards}
                 selectedBoardId={selectedBoardId}

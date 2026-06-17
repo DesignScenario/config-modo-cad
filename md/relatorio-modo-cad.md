@@ -756,4 +756,124 @@ Operações que disparam múltiplos callbacks (alinhamento de N polígonos, excl
 
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.17*
+---
+
+### v1.0.18 — Ícones de Desfazer e Refazer (Junho de 2026)
+
+Adição dos ativos SVG/PNG para os botões de Desfazer e Refazer na toolbar.
+
+#### 10.1 Arquivos Criados
+
+| Arquivo | Descrição |
+|---|---|
+| `src/assets/desfazer.svg` | Ícone do botão Desfazer (Ctrl+Z) |
+| `src/assets/desfazer.png` | Variante PNG do ícone |
+| `src/assets/refazer.svg` | Ícone do botão Refazer (Ctrl+Y) |
+| `src/assets/refazer.png` | Variante PNG do ícone |
+
+---
+
+### v1.0.19 — Multi-drag, Botão Excluir e Correções (Junho de 2026)
+
+Esta versão agrupa quatro melhorias independentes: arrastar seleção múltipla, refatoração do botão "Excluir" da toolbar, correção do cancelamento da escala e correção das áreas PIR/OC durante arraste.
+
+#### 11.1 Arrastar Seleção Múltipla
+
+Com itens selecionados via rubber band ou Shift+click, arrastar qualquer item selecionado move todos juntos.
+
+**Estado `draggingMulti`** em `CadCanvas.jsx`:
+
+```js
+{
+  startStagePoint: {x, y},
+  stageDelta: {x, y},
+  polygons: [{
+    polygonId,
+    initialPolygonPoints,
+    initialEquipmentPoints:   [{id, point}],
+    initialBoardPoints:       [{id, point}],
+    initialAvOrganizerPoints: [{id, point}],
+    initialCurtainRects:      [{id, rectStart, rectEnd}],
+  }],
+  looseEquipments: [{id, initialPoint}],  // equipamentos selecionados fora de polígonos selecionados
+}
+```
+
+**Ativação:**
+
+| Item | Trigger | Hold timer |
+|---|---|---|
+| Polígono em `multiSelectedPolygonIds` | `handlePolygonMouseDown` | Não — imediato |
+| Equipamento em `multiSelectedEquipmentIds` | `handleEquipmentMouseDown` | Sim — `EQUIPMENT_HOLD_TO_DRAG_MS` |
+
+**`buildMultiDragState(stagePoint)`** — helper que captura o estado inicial de todos os itens selecionados no momento em que o arraste começa.
+
+**Live rendering:** `useEffect([draggingMulti])` atualiza `stageDelta` e chama `setPolygons` a cada `pointermove`, atualizando os polígonos em tempo real (mesmo padrão do drag individual de polígono).
+
+**Commit:** `onMultiTranslated({ polygonTranslations, looseEquipmentUpdates })` → `handleMultiTranslated` em `App.jsx`.
+
+**`handleMultiTranslated`** usa o padrão `isBatchingRef`: empurra **um único snapshot** antes de qualquer mutação, itera `handlePolygonTranslated` para cada polígono (snapshots bloqueados pelo flag), aplica `handleEquipmentPointsUpdate` para equipamentos soltos, desliga o batching. Resultado: Ctrl+Z desfaz todo o movimento com um único passo no histórico.
+
+#### 11.2 Helper `getPolygonDragData`
+
+Para que todos os paths de rendering funcionem tanto no drag single quanto no multi-drag, foi criado o helper:
+
+```js
+const getPolygonDragData = (polygonId) => {
+  if (draggingPolygon?.polygonId === polygonId) return draggingPolygon
+  if (draggingMulti) {
+    const pd = draggingMulti.polygons.find((p) => p.polygonId === polygonId)
+    if (pd) return { ...pd, stageDelta: draggingMulti.stageDelta }
+  }
+  return null
+}
+```
+
+Substituiu todas as verificações `draggingPolygon?.polygonId === x` em 8 paths de rendering: circuit line, sensor de teto, sensor PIR, sensor OC, equipamentos avulsos, boards, organizadores AV e cortinas.
+
+#### 11.3 Correção das Áreas PIR/OC Durante Arraste (double-delta)
+
+**Bug:** ao arrastar um ambiente, as áreas de detecção PIR e OC se deslocavam 2× o delta correto.
+
+**Causa raiz:** `polygon.points` já é atualizado em tempo real via `setPolygons` durante qualquer drag de polígono (React 18 faz batch dos dois `setState` no mesmo render). O código anterior aplicava `stageDelta` sobre pontos que já estavam na posição deslocada — duplo deslocamento.
+
+**Correção:**
+```js
+// Depois (correto): polygon.points já reflete o deslocamento
+const polyStagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+```
+
+Aplicado às clip regions de ambos os sensores PIR e OC.
+
+**Nota:** o `stagePoint` do equipamento (centro da área) ainda aplica `stageDelta` corretamente, pois `equipment.point` em estado **não** é atualizado durante o drag — somente no commit.
+
+#### 11.4 Botão "Excluir" da Toolbar
+
+O botão "Excluir" da `TopToolbar` antes tentava ativar a ferramenta `'delete'` (inexistente). Agora usa o padrão de token `deleteRequest` — idêntico ao `alignRequest`:
+
+| Antes | Depois |
+|---|---|
+| `onClick={() => onToolChange('delete')}` | `onClick={onDeleteSelected}` |
+| Título: "Excluir Polígono" | Título: "Excluir (Delete)" |
+
+`App.jsx` incrementa `deleteTokenRef.current` e chama `setDeleteRequest({ token })`. `CadCanvas` tem um `useEffect` em `[deleteRequest]` que chama `triggerDelete()` — a mesma função `useCallback` reutilizada pelo atalho de teclado `Delete`.
+
+O handler `triggerDelete` foi extraído como `useCallback` para que possa ser referenciado nos dois `useEffect` (teclado e token) sem violação de closure stale.
+
+**Nota:** o atalho de teclado foi alterado para escutar apenas `Delete` (removido `Backspace`), pois `Backspace` durante renomeação inline causava exclusão acidental.
+
+#### 11.5 Cancelar Overlay de Valor de Escala
+
+`handleCancelScaleValueOverlay` agora retorna à ferramenta `polygon` com `setIsAwaitingScaleLine(true)`, para que o usuário possa desenhar imediatamente uma nova linha de referência. Antes, voltava para `select`, forçando o usuário a reiniciar o fluxo de escala manualmente.
+
+#### 11.6 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/App.jsx` | `handleCancelScaleValueOverlay` corrigido; `deleteRequest`/`deleteTokenRef`; `handleDeleteSelected`; `handleMultiTranslated`; props `onDeleteSelected` e `deleteRequest`/`onMultiTranslated` passadas aos filhos |
+| `src/components/CadCanvas.jsx` | `draggingMulti` state; `buildMultiDragState`; `getPolygonDragData`; `useEffect` do multi-drag; `triggerDelete` useCallback; `useEffect` para `deleteRequest`; `getEquipmentDragPoint` atualizado para `looseEquipments`; 8 paths de rendering migrados para `getPolygonDragData`; `polyStagePoints` PIR/OC corrigido |
+| `src/components/TopToolbar.jsx` | Prop `onDeleteSelected`; botão "Excluir" refatorado para `onClick={onDeleteSelected}` |
+
+---
+
+*Relatório atualizado em Junho de 2026 — v1.0.19*
