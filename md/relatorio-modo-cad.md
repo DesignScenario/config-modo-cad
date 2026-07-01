@@ -876,4 +876,97 @@ O handler `triggerDelete` foi extraído como `useCallback` para que possa ser re
 
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.19*
+### v1.0.20 — Novos Quadros e Organizador AV (Junho de 2026)
+
+Esta versão reformula completamente a forma como Quadros de Automação e Organizador AV são posicionados e exibidos no canvas: os quadros fixos passam a ter desenho técnico em escala real, e o Quadro Custom e o Organizador AV migram do modelo antigo (ponto + grade de slots configurada por colunas) para retângulos redimensionáveis, no mesmo estilo das Cortinas.
+
+#### 12.1 Quadros de Automação Fixos (AC-QA6M / AC-QA12M) — Wireframe Técnico
+
+Os dois quadros fixos ganharam entrada em `EQUIPMENT_WIREFRAMES` (`ac-qa-6m.svg` / `ac-qa-12m.svg`, 500 × 110 mm) e passaram a ser renderizados com o desenho técnico em escala real, no lugar do ícone com grade de slots expansível por hover.
+
+| Aspecto | Antes (v1.0.19) | Depois (v1.0.20) |
+|---|---|---|
+| Renderização | Ícone + pin; hover expande grade de slots | Wireframe técnico em escala real (`cad-board-placement--wireframe`) |
+| Posição | Ponto livre | Ponto único, sempre clampado dentro do polígono do ambiente |
+| Ver módulos instalados | Grade expansível por hover/pin | Botão **trigger** (seta `▸`/`◂`, inverte de lado conforme espaço) abre um **dropdown** com a lista de módulos e botão de remover (`×`) |
+| Instalar módulo | Drag-and-drop sobre a célula de slot | Drag-and-drop sobre o retângulo do wireframe; feedback `is-drop-target`/`is-invalid-target` |
+| Pin | Existia (`board.pinned`) | Removido |
+
+#### 12.2 Quadro Custom — Nova Entidade Independente
+
+O Quadro Custom (`sce-quadros-3`) saiu do array `automationBoards` e ganhou seu próprio estado, `customBoards`, com estrutura de dados equivalente à das Cortinas:
+
+```js
+{ id, catalogItemId, polygonId, rectStart: {x,y}, rectEnd: {x,y},
+  label, iconSrc, iconKey, filterKeys, environmentId,
+  slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
+```
+
+| Aspecto | Antes (v1.0.13–19) | Depois (v1.0.20) |
+|---|---|---|
+| Catálogo | `BOARD_CATALOG_IDS` (junto com AC-QA6M/12M) | `CUSTOM_BOARD_CATALOG_IDS` (próprio) |
+| Criação | Overlay `AutomationBoardOverlay` pedindo número de colunas (1–12) | Desenho de retângulo por 2 cliques direto no canvas (igual Cortina), sem overlay |
+| Tamanho | Definido pelo número de colunas | Definido pelo retângulo desenhado; redimensionável por 4 handles de canto |
+| Ver/remover módulos | Grade expansível por hover/pin | Trigger + dropdown (igual aos quadros fixos) |
+| Menu de contexto | Renomear / Propriedades / Excluir | Renomear / **Editar tamanho** / Excluir |
+| Contenção | Livre | Sempre restrito a ficar dentro do polígono (`clampRectCornerToPolygon`) |
+
+#### 12.3 Organizador AV — Conversão para Retângulo
+
+O Organizador AV sofreu a mesma transformação do Quadro Custom:
+
+| Aspecto | Antes (v1.0.13–19) | Depois (v1.0.20) |
+|---|---|---|
+| Estrutura | `point`, `columnCount`, `pinned` | `rectStart`/`rectEnd`; `columnCount` e `pinned` removidos |
+| Criação | Overlay `AvOrganizerOverlay` pedindo número de colunas (1–12) | Desenho de retângulo por 2 cliques direto no canvas |
+| Tamanho | Grade fixa por colunas | Retângulo redimensionável (4 handles de canto) |
+| Ver/remover dispositivos | Grade expansível por hover/pin, menu por slot ("Remover dispositivo") | Trigger + dropdown com botão remover por item |
+| Menu de contexto | Renomear / Propriedades / Excluir | Renomear / **Editar tamanho** / Excluir |
+| Mover para outro ambiente | Reatribuía `environmentId`/`polygonId` automaticamente | Apenas atualiza `rectStart`/`rectEnd` — não reatribui mais ambiente automaticamente |
+
+#### 12.4 Contenção de Retângulos no Polígono
+
+Dois helpers novos em `CadCanvas.jsx`, compartilhados por Cortinas, Organizador AV e Quadro Custom:
+
+- `rectFitsInPolygon(rectStartNorm, rectEndNorm, polygonNormPoints)` — true se os 4 cantos do retângulo estão dentro do polígono.
+- `clampRectCornerToPolygon(fixedCornerNorm, movingCornerNorm, polygonNormPoints)` — busca binária (16 iterações) que encontra o ponto mais distante ainda válido dentro do polígono, ao longo do segmento entre o canto fixo e o canto em movimento.
+
+Usados no desenho inicial (2 cliques) e no arraste dos handles de redimensionamento. Como consequência, **Cortinas também passaram a ser contidas no polígono** — antes podiam ser arrastadas/redimensionadas livremente; agora a ordem de tentativa ao arrastar é: movimento livre → só eixo X → só eixo Y → não move.
+
+#### 12.5 Wireframes Técnicos — Sem Limiar de Zoom e Novo Catálogo
+
+- O limiar `zoom >= 200%` para exibir wireframe técnico foi **removido** — agora renderiza em qualquer zoom, bastando a escala (`scaleDefinition`) estar definida.
+- Cerca de 30 novos desenhos técnicos foram cadastrados em `EQUIPMENT_WIREFRAMES`: Quadros fixos (AC-QA6M/12M), sensores de teto (AC-MOV-TETO, EB-SMT/v2), AC-TMD, pulsadores Essence (AC-PULS2/3), todos os Keypads Virtue/Essence/Prestige, e Touch Panels (EB-TW4, EB-TW10).
+- Equipamentos com wall-snap (`wallNormal`) agora deslocam o wireframe para que a borda externa fique encostada na parede, em vez de centralizar o desenho no ponto de ancoragem.
+- Rótulo de Cortinas, Organizador AV e Quadro Custom passou a usar um padrão único e compartilhado (`.cad-rect-outside-label`).
+
+#### 12.6 Outras Mudanças
+
+| Mudança | Descrição |
+|---|---|
+| Novo equipamento | AC-TMD (`amb-acessorios-2`, Ambiente > Acessórios), com wall-snap (`WALL_SNAP_CATALOG_IDS`), sem sensor PIR/OC |
+| `MAX_ZOOM` | `1000%` → `3000%` |
+| Ícones | Todos os ícones de equipamentos, quadros e organizadores passaram a usar `filter: grayscale(1)` (CSS) |
+| Ambientes | Polígono não selecionado: de preenchimento colorido semi-transparente para apenas contorno (`#1f1f1f`, fill transparente); selecionado com opacidade de fill reduzida (`0.08`) |
+| Exclusão de ambiente | Cascata de limpeza ao apagar um polígono passou a incluir também Organizadores AV, Cortinas e Quadros Custom (antes só limpava equipamentos e quadros fixos) |
+| Seleção na árvore | `selectedNodeId` passou a refletir também seleção de Organizador AV, Quadro Custom e Cortina |
+| Drag-and-drop | `EquipmentLibraryOverlay` agora também grava os marcadores `application/x-board-only-item` / `application/x-av-org-only-item` no `dataTransfer`, usados por `CadCanvas` só para feedback visual de alvo válido/inválido (o payload real continua em `application/x-equipment-item`) |
+
+#### 12.7 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/App.jsx` | Novo estado `customBoards` e todo o conjunto de handlers espelhando `avOrganizers` (`handleCreateCustomBoard`, `handleCustomBoardRectDrawn/Cancel/Moved`, slots install/remove, rename/select/delete); `avOrganizers` migrado para `rectStart`/`rectEnd` (`handleCreateAvOrganizer`, `handleAvOrganizerRectDrawn/Cancel/Moved` reescritos); removidos `handleBoardEditRequest/Confirm`, `handleAvOrganizerEditRequest/Confirm/PinToggle`; `handlePolygonTranslated` com `avOrganizerRects`/`customBoardRects` no lugar de `avOrganizerPoints`; cascata de exclusão de polígono estendida; snapshot de undo/redo passa a incluir `customBoards`; `MAX_ZOOM = 3000` |
+| `src/components/CadCanvas.jsx` | Renderização wireframe para quadros fixos; novos componentes inline `cad-custom-board-rect`/`cad-av-organizer-rect` com resize por handles; `cad-board-trigger`/`cad-board-dropdown` para instalar/remover módulos; helpers `rectFitsInPolygon`/`clampRectCornerToPolygon`; remoção do limiar `zoom >= 200` para wireframes; offset de posição para wireframes com wall-snap; `equipmentLabelOffsets` generalizado para tratar boards/organizadores/cortinas como itens retangulares na detecção de colisão; polígono não selecionado agora só com contorno |
+| `src/data/equipmentLibrary.js` | Novo item `amb-acessorios-2` (AC-TMD); `BOARD_CATALOG_IDS` restrito a `sce-quadros-1/2`; novo `CUSTOM_BOARD_CATALOG_IDS` com `sce-quadros-3`; AC-TMD adicionado a `WALL_SNAP_CATALOG_IDS` |
+| `src/data/wireframes.js` | ~30 novas entradas em `EQUIPMENT_WIREFRAMES` (quadros fixos, sensores de teto, AC-TMD, pulsadores Essence, keypads Virtue/Essence/Prestige, touch panels) |
+| `src/components/EquipmentLibraryOverlay.jsx` | `dataTransfer` de itens board-only/av-org-only ganha marcadores extras (`application/x-board-only-item`, `application/x-av-org-only-item`) |
+| `src/components/TopToolbar.jsx` | `MAX_ZOOM = 3000` |
+| `src/styles/cad.css` | Novas classes para o modelo de retângulo (`cad-board-placement--wireframe`, `cad-board-trigger`, `cad-board-dropdown`, `cad-av-organizer-rect`, `cad-custom-board-rect`, `cad-rect-outside-label`); `filter: grayscale(1)` em ícones; grades antigas de slot (`cad-av-organizer-structure`, `cad-av-organizer-slot`) removidas |
+| `src/assets/wireframes/*.svg` | ~40 novos desenhos técnicos SVG adicionados (quadros, keypads, touch panels, sensores, pulsadores); `pst-kp3.svg` (nome antigo) removido em favor de `pst-kp3-4x2.svg` |
+
+**Observação:** o import de `AutomationBoardOverlay` em `App.jsx` ficou sem nenhum uso após esta mudança (o Quadro Custom não passa mais por ele) — candidato a remoção em uma limpeza futura.
+
+---
+
+*Relatório atualizado em Junho de 2026 — v1.0.20*

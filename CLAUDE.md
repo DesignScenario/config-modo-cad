@@ -64,19 +64,21 @@ Ambientes são desenhados como polígonos Konva. Cada polígono é mapeado a um 
   circuitId?: string,           // ID do circuito — presente em luminárias do mesmo circuito
   isCircuitLeader?: boolean }   // true apenas no primeiro item do circuito (único na árvore do projeto)
 
-// Quadro de Automação
+// Quadro de Automação (fixo — AC-QA6M / AC-QA12M)
 { id, catalogItemId, polygonId, point, label, iconSrc, iconKey, filterKeys,
   environmentId,
-  slotCount: number | null,  // null = Quadro Custom (dinâmico); 6 ou 12 = fixo
-  columnCount: number,       // 1–12, só relevante para Quadro Custom
-  pinned: boolean,
+  slotCount: number,  // 6 ou 12
+  slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
+// Renderizado como wireframe técnico em escala real (ponto único, clampado no polígono) — ver seção "Quadros de Automação"
+
+// Quadro Custom (entidade própria — sce-quadros-3, não faz mais parte de automationBoards)
+{ id, catalogItemId, polygonId, rectStart: {x,y}, rectEnd: {x,y},
+  label, iconSrc, iconKey, filterKeys, environmentId,
   slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
 
 // Organizador AV
-{ id, catalogItemId, polygonId, point, label, iconSrc, iconKey, filterKeys,
-  environmentId,
-  columnCount: number,  // 1–12, definido no AvOrganizerOverlay
-  pinned: boolean,
+{ id, catalogItemId, polygonId, rectStart: {x,y}, rectEnd: {x,y},
+  label, iconSrc, iconKey, filterKeys, environmentId,
   slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
 
 // Cortina posicionada
@@ -96,15 +98,20 @@ A manipulação da árvore usa funções utilitárias recursivas dentro de `App.
 `src/data/equipmentLibrary.js` define o catálogo hierárquico completo (categorias: iluminacao, pulsadores, motores, persianas, sensores, drivers, …). A visibilidade dos equipamentos no canvas é controlada pelo objeto de estado `equipmentFilters` e pela função `isEquipmentIconVisible()` em `CadCanvas.jsx`.
 
 **Exports relevantes:**
-- `BOARD_CATALOG_IDS` — `Set` com `'sce-quadros-1'`, `'sce-quadros-2'`, `'sce-quadros-3'`
+- `BOARD_CATALOG_IDS` — `Set` com `'sce-quadros-1'`, `'sce-quadros-2'` (quadros fixos, 6/12 slots)
+- `CUSTOM_BOARD_CATALOG_IDS` — `Set` com `'sce-quadros-3'` (Quadro Custom — entidade própria `customBoards`, ver seção dedicada)
 - `AV_ORGANIZER_CATALOG_IDS` — `Set` com `'drv-av-organizer'`
 - `isBoardOnlyItem(catalogItemId)` — true para itens que só existem em slots de quadros (prefixos: `sce-automation-*`, `sce-interfaces-*`, `sce-modulos-*`, `sce-entrada-*`)
 - `isAvOrganizerOnlyItem(catalogItemId)` — true para todos os itens folha da aba Drivers (exceto o próprio `drv-av-organizer`)
-- `getBoardSlotCount(catalogItemId)` — retorna `6`, `12` ou `null` (Custom)
+- `getBoardSlotCount(catalogItemId)` — retorna `6` ou `12`
 
 ### Wireframes técnicos
 
-Quando `zoom >= 200`, os equipamentos são renderizados com seu desenho técnico em escala real em vez do ícone. A lógica vive inteiramente em `CadCanvas.jsx` (no loop de renderização dos equipamentos) e no mapa `src/data/wireframes.js`.
+Equipamentos com entrada em `EQUIPMENT_WIREFRAMES` são renderizados com seu desenho técnico em escala real em vez do ícone, **em qualquer nível de zoom** — basta `scaleDefinition` já estar definida. Não há mais limiar de zoom para esse comportamento (versões anteriores exigiam `zoom >= 200`). A lógica vive inteiramente em `CadCanvas.jsx` (no loop de renderização dos equipamentos) e no mapa `src/data/wireframes.js`.
+
+O catálogo cobre hoje: Quadros de Automação fixos (AC-QA6M/AC-QA12M), sensores de teto (AC-MOV-TETO, EB-SMT/v2), AC-TMD, pulsadores Essence (AC-PULS2/3), todos os Keypads Virtue (Standard e Metal)/Essence/Prestige, e os Touch Panels (EB-TW4, EB-TW10).
+
+Equipamentos com `wallNormal` (itens de `WALL_SNAP_CATALOG_IDS`) têm a posição do wireframe deslocada para que a borda externa do desenho fique encostada na parede, em vez de centralizar o desenho sobre o ponto de ancoragem.
 
 **`src/data/wireframes.js`** — única fonte de verdade para wireframes:
 ```js
@@ -132,52 +139,83 @@ Se o equipamento não tiver entrada em `EQUIPMENT_WIREFRAMES`, ou se `scaleDefin
 
 O rótulo no modo wireframe é posicionado abaixo e centralizado; no modo ícone, fica à direita. A classe CSS modificadora `cad-equipment-placement--wireframe` (em `src/styles/cad.css`) controla essa diferença de layout.
 
-### Quadros de Automação
+### Quadros de Automação (fixos)
 
-Quadros de Automação são equipamentos Scenario especiais que possuem slots para instalação de módulos. Três tipos, definidos pelo `catalogItemId`:
+Quadros de Automação fixos são equipamentos Scenario com número de slots imutável, definidos pelo `catalogItemId`:
 
 | catalogItemId | Label | Slots |
 |---|---|---|
 | `sce-quadros-1` | AC-QA6M | 6 (fixo) |
 | `sce-quadros-2` | AC-QA12M | 12 (fixo) |
-| `sce-quadros-3` | Quadro Custom | dinâmico, até 99 módulos (colunas 1–12) |
+
+Vivem em `automationBoards` (`App.jsx`). O Quadro Custom (`sce-quadros-3`) **não** faz mais parte desse grupo — é uma entidade própria (`customBoards`), ver seção seguinte.
 
 **Fluxo de criação** (em App.jsx `handleEquipmentDropped`):
 1. Se `isBoardOnlyItem` → rejeitado (só aceito em slots de quadros)
-2. Se `BOARD_CATALOG_IDS`: AC-QA6M/AC-QA12M → `handleCreateBoard` imediato; Quadro Custom → abre `AutomationBoardOverlay` para escolha do número de colunas (1–12)
+2. Se `AV_ORGANIZER_CATALOG_IDS` → fluxo do Organizador AV (ver seção própria)
+3. Se `CUSTOM_BOARD_CATALOG_IDS` → fluxo do Quadro Custom (ver seção própria)
+4. Se `BOARD_CATALOG_IDS` (AC-QA6M/AC-QA12M) → `handleCreateBoard` imediato, com `slotCount` de `getBoardSlotCount(catalogItemId)`
 
-**Renderização** em `CadCanvas.jsx`:
-- Estado **Padrão**: pin + ícone + rótulo
-- Estado **Hover / Pinado**: expande grade de slots (CSS `:hover` + classe `is-pinned`)
-- Slot vazio: drop target; slot ocupado: botão direito → menu "Remover dispositivo"
-- Pin: clique alterna `board.pinned`
-- Rótulo obedece ao filtro `equipmentFilters.text`
+**Renderização** em `CadCanvas.jsx`: ambos têm entrada em `EQUIPMENT_WIREFRAMES` (`ac-qa-6m.svg` / `ac-qa-12m.svg`, 500×110 mm) e por isso são renderizados como **wireframe técnico em escala real** (classe `cad-board-placement--wireframe`), não mais como ícone + grade de slots:
+- Ponto único (não retângulo), sempre restrito (clamp) para permanecer dentro do polígono do ambiente — tanto durante o arraste quanto na renderização estática.
+- **Trigger**: botão seta (`cad-board-trigger`, `▸`/`◂`) ao lado do wireframe; inverte de lado automaticamente se não houver espaço dentro do polígono. Clique abre/fecha um dropdown (`cad-board-dropdown`) listando os módulos instalados, cada um com botão de remover (`×`, chama `onBoardSlotRemove`). Clique fora fecha o dropdown.
+- **Instalação de módulo**: continua via drag-and-drop nativo — arrastar um item da biblioteca e soltar sobre o retângulo do wireframe (não mais sobre células de slot individuais). `onDragOver`/`onDrop` checam `application/x-board-only-item` para dar feedback visual (`is-drop-target` se há espaço, `is-invalid-target` se o quadro está cheio); arrastar um item de quadro sobre o wireframe abre o dropdown automaticamente como preview. O payload real instalado ainda vem de `application/x-equipment-item`.
+- Pin (`board.pinned`) e a grade expansível por hover foram **removidos** para este tipo — a lista de módulos só aparece via dropdown do trigger.
+- Rótulo obedece ao filtro `equipmentFilters.text`, usando o padrão `.cad-board-wf-label` (abaixo do wireframe).
+
+### Quadro Custom
+
+O Quadro Custom (`sce-quadros-3`, label "Quadro Custom") deixou de fazer parte de `automationBoards` e agora é uma entidade própria em `App.jsx`:
+
+```js
+// Quadro Custom
+{ id, catalogItemId, polygonId, rectStart: {x,y}, rectEnd: {x,y},
+  label, iconSrc, iconKey, filterKeys, environmentId,
+  slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
+// rectStart / rectEnd: coordenadas normalizadas [0..1], mesmo formato de Cortina
+```
+
+- `CUSTOM_BOARD_CATALOG_IDS` (`src/data/equipmentLibrary.js`) — `Set` com `'sce-quadros-3'`, separado de `BOARD_CATALOG_IDS`.
+- **Fluxo de criação**: ao soltar no canvas, `App.jsx` define `pendingCustomBoardEquipment` (`{ polygonId, environmentId, equipment }`) e o canvas entra em modo de desenho retangular por 2 cliques — **idêntico ao fluxo de Cortinas**, sem overlay de configuração de colunas. Ao concluir, `onCustomBoardRectDrawn` → `handleCreateCustomBoard` cria o registro com `slots: [null]` (um slot `+` de abertura).
+- **Renderização**: `cad-custom-board-rect`, retângulo com 4 handles de canto para redimensionar (reaproveita `.cad-curtain-resize-handle`), sempre restrito a permanecer dentro do polígono (`clampRectCornerToPolygon`, ver "Contenção de Retângulos no Polígono").
+- **Slots**: mesmo comportamento dinâmico de antes — cresce até 99 módulos, compacta nulos consecutivos ao remover, sempre com 1 slot vazio de sobra.
+- **Trigger/dropdown**: mesmo padrão dos quadros fixos (`cad-board-trigger` + `cad-board-dropdown`), instalação por drag-and-drop sobre o retângulo.
+- **Menu de contexto**: Renomear / **Editar tamanho** / Excluir — "Propriedades" (edição de colunas) foi removida, já que o tamanho agora é definido pelo desenho do retângulo, não por um número de colunas.
 
 ### Organizador AV
 
-Organizador AV é o equivalente dos Quadros de Automação para a aba **Drivers**. Um único tipo:
+Organizador AV é o equivalente do Quadro Custom para a aba **Drivers** — mesmo modelo de retângulo redimensionável. Um único tipo:
 
 | catalogItemId | Label | Slots |
 |---|---|---|
-| `drv-av-organizer` | Organizador AV | dinâmico, até 99 dispositivos (colunas 1–12) |
+| `drv-av-organizer` | Organizador AV | dinâmico, até 99 dispositivos |
 
 **Regra de negócio:** todos os itens folha da aba Drivers (`isAvOrganizerOnlyItem`) só podem ser instalados em slots de um Organizador AV — não podem ser soltos diretamente no canvas.
 
-**Estado** em `App.jsx` (`avOrganizers`): mesma forma do `automationBoards`, com `columnCount` (1–12) e `slots` dinâmicos (sem `slotCount` fixo).
+**Estado** em `App.jsx` (`avOrganizers`):
+```js
+// Organizador AV
+{ id, catalogItemId, polygonId, rectStart: {x,y}, rectEnd: {x,y},
+  label, iconSrc, iconKey, filterKeys, environmentId,
+  slots: Array<{ id, catalogItemId, label, iconSrc, iconKey } | null> }
+```
+`columnCount` e `pinned` foram **removidos** do modelo — o tamanho visual é definido pelo retângulo (`rectStart`/`rectEnd`), não por colunas.
 
 **Fluxo de criação** (em `handleEquipmentDropped`):
 1. Se `isAvOrganizerOnlyItem` → rejeitado
-2. Se `AV_ORGANIZER_CATALOG_IDS` → abre `AvOrganizerOverlay` para escolha do número de colunas (1–12), depois `handleCreateAvOrganizer`
+2. Se `AV_ORGANIZER_CATALOG_IDS` → `App.jsx` define `pendingAvOrganizerEquipment` (`{ polygonId, environmentId, equipment }`) e o canvas entra em modo de desenho retangular por 2 cliques (igual Cortinas/Quadro Custom) — **não abre mais overlay de colunas** (`AvOrganizerOverlay` deixou de ser usado). Ao concluir, `onAvOrganizerRectDrawn` → `handleCreateAvOrganizer`.
 
 **Renderização** em `CadCanvas.jsx`:
-- Layout e comportamento idênticos ao Quadro de Automação
-- Grade dinâmica: `Math.min(slots.length, columnCount)` colunas; slot vazio exibido com `+`
-- Opção **Propriedades** no menu contextual reabre o `AvOrganizerOverlay` para reconfigurar colunas
-- CSS: `.cad-av-organizer-placement`, `.cad-av-organizer-structure`, `.cad-av-organizer-slot` — tema azul (`#2980b9` e tonalidades); título do overlay via `.cad-multi-overlay__title-bar--av`
-- Pin reutiliza `.cad-board-pin`
-- Rótulo obedece ao filtro `equipmentFilters.text`
+- `cad-av-organizer-rect`, mesmo padrão visual e de interação do Quadro Custom: 4 handles de canto para redimensionar (`clampRectCornerToPolygon`), trigger (`cad-board-trigger`) + dropdown (`cad-board-dropdown`) para ver/remover dispositivos instalados, instalação por drag-and-drop sobre o retângulo
+- Slot vazio não é mais exibido em grade própria — a lista só aparece no dropdown do trigger
+- **Menu de contexto**: Renomear / **Editar tamanho** / Excluir — "Propriedades" (colunas) foi removida
+- Pré-visualização do retângulo durante o desenho: `Rect` Konva tracejado azul (`#2980b9`)
+- Pin e grade expansível por hover foram **removidos**
+- Rótulo usa o padrão compartilhado `.cad-rect-outside-label` (ver Cortinas)
 
-**Movimento com polígono:** ao arrastar um ambiente, `draggingPolygon.initialAvOrganizerPoints` rastreia as posições iniciais dos organizadores pertencentes ao polígono, e `onPolygonTranslated` recebe `avOrganizerPoints` para persistir as novas posições.
+**Movimento com polígono:** `draggingPolygon.initialAvOrganizerRects` (antes `initialAvOrganizerPoints`) rastreia `{ id, rectStart, rectEnd }` dos organizadores do polígono; `onPolygonTranslated` recebe `avOrganizerRects: [{ avOrganizerId, rectStart, rectEnd }]`.
+
+**Mover para outro ambiente:** `handleAvOrganizerMoved` agora só atualiza `rectStart`/`rectEnd` — **não reatribui mais `environmentId`/`polygonId`** automaticamente quando o retângulo é arrastado para dentro de outro ambiente (comportamento antigo removido).
 
 ### Cortinas
 
@@ -192,7 +230,7 @@ O início do retângulo é capturado em `handleCanvasMouseDownCapture` (fase de 
 
 **Renderização** em `CadCanvas.jsx` (HTML overlay sobre o Stage Konva):
 - `<div class="cad-curtain-placement">` posicionado com `left/top/width/height` calculados dos dois pontos normalizados
-- `<div class="cad-curtain-icon-center">` centralizado no retângulo (ícone + rótulo); `font-size: 11px`; `pointer-events: none` no wrapper, `pointer-events: auto` nos filhos (input/span)
+- `<div class="cad-curtain-icon-center">` é hoje apenas um div de ancoragem vazio (marca o centro do retângulo); ícone e rótulo migraram para o padrão compartilhado `.cad-rect-outside-label` (mesmo usado por Organizador AV e Quadro Custom)
 - Rótulo usa `equipmentLabelOffsets` para posicionamento inteligente (igual a equipamentos avulsos)
 - Input de renomeio inline aplica o mesmo offset `left/top/transform:none` do label
 
@@ -209,6 +247,17 @@ O início do retângulo é capturado em `handleCanvasMouseDownCapture` (fase de 
 2. **Live rendering**: aplica `stageDelta` a ambos os pontos via `normToStage` → deslocamento → `stageToNorm`
 3. **Commit** (`onPolygonTranslated`): recebe `curtainRects: [{ curtainId, rectStart, rectEnd }]` → App.jsx atualiza `placedCurtains`
 
+**Contenção no polígono:** arraste e redimensionamento de canto são restritos a manter a cortina inteiramente dentro do polígono do ambiente (mesmos helpers `rectFitsInPolygon`/`clampRectCornerToPolygon` usados por Organizador AV e Quadro Custom — ver seção seguinte). Ao arrastar, a ordem de tentativa é: movimento livre → só eixo X → só eixo Y → não move.
+
+### Contenção de Retângulos no Polígono
+
+Cortinas, Organizador AV e Quadro Custom compartilham dois helpers de módulo em `CadCanvas.jsx` para impedir que seus retângulos saiam do polígono do ambiente:
+
+- `rectFitsInPolygon(rectStartNorm, rectEndNorm, polygonNormPoints)` — true se os 4 cantos do retângulo (coords normalizadas) estão dentro do polígono (via `isPointInsidePolygon`).
+- `clampRectCornerToPolygon(fixedCornerNorm, movingCornerNorm, polygonNormPoints)` — busca binária (16 iterações) ao longo do segmento entre o canto fixo e o canto em movimento, retornando o ponto mais distante ainda válido dentro do polígono.
+
+Usados tanto no desenho inicial por 2 cliques (o segundo clique é clampado enquanto o cursor se move) quanto no arraste dos handles de redimensionamento de canto.
+
 ### Zoom e Visibilidade de Textos
 
 O sistema controla a visibilidade de todos os rótulos baseado no nível de zoom atual, usando constantes configuráveis em `CadCanvas.jsx`:
@@ -223,7 +272,7 @@ const ENV_TEXT_ZOOM_TRUNCATED    = 20    // 20–39%: truncado; pé-direito ocul
 // <20%: oculto
 ```
 
-`MIN_ZOOM = 10` (em `CadCanvas.jsx`, `App.jsx` e `TopToolbar.jsx`) — zoom mínimo de 10% para que os limiares de ambiente (40%/20%) sejam atingíveis.
+`MIN_ZOOM = 10` (em `CadCanvas.jsx`, `App.jsx` e `TopToolbar.jsx`) — zoom mínimo de 10% para que os limiares de ambiente (40%/20%) sejam atingíveis. `MAX_ZOOM = 3000` (era `1000`) nos mesmos três arquivos.
 
 **Computed values** (não hooks, recalculados a cada render):
 ```js
@@ -287,7 +336,7 @@ Ao inserir múltiplas luminárias via **Adição Múltipla**, o overlay `AddMult
 Pulsadores com sensor de movimento (ex.: AC-KPUL*-MOV, AC-PULS3-MOV) e teclados com sensor PIR ou OC (ex.: EB-KP0M, EB-KP6M, ESN-KP3M-PIR, PST-KP6M-PIR, EB-KP6M-OC, ESN-KP3M-OC, PST-KP6M-OC) têm comportamento especial ao serem posicionados no canvas.
 
 **Três sets exportados de `src/data/equipmentLibrary.js`:**
-- `WALL_SNAP_CATALOG_IDS` — todos os pulsadores e teclados (com e sem sensor); ao soltar no canvas, o ponto é projetado sobre a aresta mais próxima do polígono
+- `WALL_SNAP_CATALOG_IDS` — todos os pulsadores e teclados (com e sem sensor), mais o AC-TMD (`amb-acessorios-2`, sem sensor PIR/OC); ao soltar no canvas, o ponto é projetado sobre a aresta mais próxima do polígono
 - `PIR_SENSOR_CATALOG_IDS` — subconjunto dos acima que têm sensor PIR (pulsadores-MOV + keypads com PIR)
 - `OC_SENSOR_CATALOG_IDS` — subconjunto que tem sensor OC (keypads com OC)
 
