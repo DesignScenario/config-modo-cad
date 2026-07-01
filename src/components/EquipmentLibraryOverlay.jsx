@@ -34,7 +34,7 @@ import sensores from '../assets/sensores.svg'
 import tw10 from '../assets/tw10.svg'
 import tw4 from '../assets/tw4.svg'
 import ventiladores from '../assets/ventilador.svg'
-import { equipmentLibraryTabs, getEquipmentFilterKeys, LIGHTING_CATALOG_IDS } from '../data/equipmentLibrary.js'
+import { equipmentLibraryTabs, getEquipmentFilterKeys, isBoardOnlyItem, isAvOrganizerOnlyItem, LIGHTING_CATALOG_IDS } from '../data/equipmentLibrary.js'
 import { useDraggable } from '../hooks/useDraggable.js'
 
 const TAB_NAMES = ['Ambiente', 'Scenario', 'Drivers']
@@ -162,6 +162,12 @@ function EquipmentTreeNode({
         filterKeys,
       }),
     )
+    if (isBoardOnlyItem(item.id)) {
+      event.dataTransfer.setData('application/x-board-only-item', '1')
+    }
+    if (isAvOrganizerOnlyItem(item.id)) {
+      event.dataTransfer.setData('application/x-av-org-only-item', '1')
+    }
     event.dataTransfer.effectAllowed = 'copy'
   }
 

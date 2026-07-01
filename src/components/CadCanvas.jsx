@@ -21,7 +21,7 @@ const POLYGON_LABEL_MIN_FONT_SIZE = 10
 const POLYGON_LABEL_LINE_HEIGHT_RATIO = 1.2
 const EQUIPMENT_HOLD_TO_DRAG_MS = 180
 const MIN_ZOOM = 10
-const MAX_ZOOM = 1000
+const MAX_ZOOM = 3000
 const MULTI_ADD_PREVIEW_COLOR = '#0095ff'
 const SENSOR_CATALOG_IDS = new Set(['amb-acessorios-1', 'sce-sensores-1', 'sce-sensores-2'])
 const SENSOR_FILL_COLOR = '#F5D59D'
@@ -181,6 +181,33 @@ function isPointInsidePolygon(point, polygonPoints) {
   }
 
   return inside
+}
+
+function rectFitsInPolygon(rsNorm, reNorm, polygonPoints) {
+  if (!polygonPoints || polygonPoints.length < 3) return true
+  return [rsNorm, { x: reNorm.x, y: rsNorm.y }, { x: rsNorm.x, y: reNorm.y }, reNorm]
+    .every((c) => isPointInsidePolygon(c, polygonPoints))
+}
+
+function clampRectCornerToPolygon(fixedNorm, movingNorm, polygonPoints) {
+  if (!polygonPoints || polygonPoints.length < 3) return movingNorm
+  const isValid = (mx, my) =>
+    [fixedNorm, { x: mx, y: fixedNorm.y }, { x: fixedNorm.x, y: my }, { x: mx, y: my }]
+      .every((c) => isPointInsidePolygon(c, polygonPoints))
+  if (isValid(movingNorm.x, movingNorm.y)) return movingNorm
+  let lo = 0, hi = 1
+  for (let i = 0; i < 16; i++) {
+    const t = (lo + hi) / 2
+    if (isValid(
+      fixedNorm.x + t * (movingNorm.x - fixedNorm.x),
+      fixedNorm.y + t * (movingNorm.y - fixedNorm.y),
+    )) lo = t
+    else hi = t
+  }
+  return {
+    x: fixedNorm.x + lo * (movingNorm.x - fixedNorm.x),
+    y: fixedNorm.y + lo * (movingNorm.y - fixedNorm.y),
+  }
 }
 
 function rotatePoint(point, center, angleDeg) {
@@ -750,22 +777,36 @@ function CadCanvas({
   onBoardMove,
   onBoardRename,
   onBoardDelete,
-  onBoardEdit,
   onBoardLabelDoubleClick,
   onBoardLabelRenameCommit,
   avOrganizers,
   selectedAvOrganizerId,
   renamingAvOrganizerId,
+  pendingAvOrganizerEquipment,
+  onAvOrganizerRectDrawn,
+  onAvOrganizerCancel,
   onAvOrganizerSelect,
-  onAvOrganizerPinToggle,
   onAvOrganizerSlotInstall,
   onAvOrganizerSlotRemove,
   onAvOrganizerMove,
   onAvOrganizerRename,
   onAvOrganizerDelete,
-  onAvOrganizerEdit,
   onAvOrganizerLabelDoubleClick,
   onAvOrganizerLabelRenameCommit,
+  customBoards,
+  selectedCustomBoardId,
+  renamingCustomBoardId,
+  pendingCustomBoardEquipment,
+  onCustomBoardRectDrawn,
+  onCustomBoardCancel,
+  onCustomBoardSelect,
+  onCustomBoardSlotInstall,
+  onCustomBoardSlotRemove,
+  onCustomBoardMove,
+  onCustomBoardRename,
+  onCustomBoardDelete,
+  onCustomBoardLabelDoubleClick,
+  onCustomBoardLabelRenameCommit,
   pendingCurtainEquipment,
   placedCurtains,
   selectedCurtainId,
@@ -821,12 +862,28 @@ function CadCanvas({
   const [boardContextMenu, setBoardContextMenu] = useState(null)
   const [draggingBoard, setDraggingBoard] = useState(null)
   const [dragOverBoardSlot, setDragOverBoardSlot] = useState(null)
+  const [activeDropdownBoardId, setActiveDropdownBoardId] = useState(null)
+  const [dragOverBoardWireframe, setDragOverBoardWireframe] = useState(null)
+  const [dragOverCustomBoard, setDragOverCustomBoard] = useState(null)
+  const [dragOverAvOrganizer, setDragOverAvOrganizer] = useState(null)
   const boardHoldTimerRef = useRef(null)
-  const [avOrganizerSlotContextMenu, setAvOrganizerSlotContextMenu] = useState(null)
   const [avOrganizerContextMenu, setAvOrganizerContextMenu] = useState(null)
+  const [avOrganizerDraftStart, setAvOrganizerDraftStart] = useState(null)
+  const [avOrganizerDraftCursor, setAvOrganizerDraftCursor] = useState(null)
+  const [activeDropdownAvOrganizerId, setActiveDropdownAvOrganizerId] = useState(null)
+  const [resizingAvOrganizer, setResizingAvOrganizer] = useState(null)
   const [draggingAvOrganizer, setDraggingAvOrganizer] = useState(null)
-  const [dragOverAvOrganizerSlot, setDragOverAvOrganizerSlot] = useState(null)
   const avOrganizerHoldTimerRef = useRef(null)
+  const [customBoardContextMenu, setCustomBoardContextMenu] = useState(null)
+  const [customBoardDraftStart, setCustomBoardDraftStart] = useState(null)
+  const [customBoardDraftCursor, setCustomBoardDraftCursor] = useState(null)
+  const [activeDropdownCustomBoardId, setActiveDropdownCustomBoardId] = useState(null)
+  const [resizingCustomBoard, setResizingCustomBoard] = useState(null)
+  const [draggingCustomBoard, setDraggingCustomBoard] = useState(null)
+  const customBoardHoldTimerRef = useRef(null)
+  const customBoardRenameInputRef = useRef(null)
+  const customBoardRenameOpenedAtRef = useRef(0)
+  const [customBoardRenameDraft, setCustomBoardRenameDraft] = useState('')
   const [curtainDraftStart, setCurtainDraftStart] = useState(null)
   const [curtainDraftCursor, setCurtainDraftCursor] = useState(null)
   const [draggingCurtain, setDraggingCurtain] = useState(null)
@@ -902,6 +959,17 @@ function CadCanvas({
   useEffect(() => {
     setPanOffset({ x: 0, y: 0 })
   }, [backgroundImage?.src])
+
+  useEffect(() => {
+    if (!activeDropdownBoardId) return
+    const handleOutsideClick = (event) => {
+      if (!event.target.closest(`[data-board-id="${activeDropdownBoardId}"]`)) {
+        setActiveDropdownBoardId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick, true)
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true)
+  }, [activeDropdownBoardId])
 
   useEffect(() => {
     if (activeTool !== 'polygon') {
@@ -992,10 +1060,22 @@ function CadCanvas({
       const container = containerRef.current
       if (!container) return
       const rect = container.getBoundingClientRect()
-      setCurtainDraftCursor({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+      const rawCursor = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      if (fittedBackgroundImage) {
+        const polygon = polygons.find((p) => p.id === pendingCurtainEquipment.polygonId)
+        if (polygon?.points?.length) {
+          const fixedNorm   = stageToNorm(curtainDraftStart, fittedBackgroundImage)
+          const movingNorm  = stageToNorm(rawCursor, fittedBackgroundImage)
+          const clampedNorm = clampRectCornerToPolygon(fixedNorm, movingNorm, polygon.points)
+          setCurtainDraftCursor(normToStage(clampedNorm, fittedBackgroundImage))
+          return
+        }
+      }
+      setCurtainDraftCursor(rawCursor)
     }
     window.addEventListener('mousemove', handleMouseMove)
     return () => window.removeEventListener('mousemove', handleMouseMove)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curtainDraftStart, pendingCurtainEquipment])
 
   useEffect(() => {
@@ -1026,10 +1106,25 @@ function CadCanvas({
       if (corner === 'tr' || corner === 'br') newSe.x = Math.max(ire.x + dx, irs.x + MIN_PX)
       if (corner === 'tl' || corner === 'tr') newSs.y = Math.min(irs.y + dy, ire.y - MIN_PX)
       if (corner === 'bl' || corner === 'br') newSe.y = Math.max(ire.y + dy, irs.y + MIN_PX)
+
+      let finalNs = stageToNorm(newSs, fittedBackgroundImage)
+      let finalNe = stageToNorm(newSe, fittedBackgroundImage)
+      const polyPts = resizingCurtain.polygonPoints ?? []
+      if (polyPts.length >= 3) {
+        const irs_n = stageToNorm(irs, fittedBackgroundImage)
+        const ire_n = stageToNorm(ire, fittedBackgroundImage)
+        const fixedNorm  = corner === 'tl' ? ire_n : corner === 'tr' ? { x: irs_n.x, y: ire_n.y } : corner === 'bl' ? { x: ire_n.x, y: irs_n.y } : irs_n
+        const movingNorm = corner === 'tl' ? finalNs : corner === 'tr' ? { x: finalNe.x, y: finalNs.y } : corner === 'bl' ? { x: finalNs.x, y: finalNe.y } : finalNe
+        const cm = clampRectCornerToPolygon(fixedNorm, movingNorm, polyPts)
+        if (corner === 'tl') { finalNs = cm; finalNe = fixedNorm }
+        else if (corner === 'tr') { finalNs = { x: fixedNorm.x, y: cm.y }; finalNe = { x: cm.x, y: fixedNorm.y } }
+        else if (corner === 'bl') { finalNs = { x: cm.x, y: fixedNorm.y }; finalNe = { x: fixedNorm.x, y: cm.y } }
+        else { finalNs = fixedNorm; finalNe = cm }
+      }
       setResizingCurtain((r) => ({
         ...r,
-        currentRectStart: stageToNorm(newSs, fittedBackgroundImage),
-        currentRectEnd:   stageToNorm(newSe, fittedBackgroundImage),
+        currentRectStart: finalNs,
+        currentRectEnd:   finalNe,
       }))
     }
     const handleUp = () => {
@@ -1059,16 +1154,22 @@ function CadCanvas({
       setDraggingCurtain((d) => {
         if (!d) return null
         const origStartStage = normToStage(d.initialRectStart, fittedBackgroundImage)
-        const origEndStage = normToStage(d.initialRectEnd, fittedBackgroundImage)
+        const origEndStage   = normToStage(d.initialRectEnd,   fittedBackgroundImage)
         const newStartX = mouseStage.x - d.dragOffset.x
         const newStartY = mouseStage.y - d.dragOffset.y
         const dx = newStartX - origStartStage.x
         const dy = newStartY - origStartStage.y
-        return {
-          ...d,
-          currentStart: stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y + dy }, fittedBackgroundImage),
-          currentEnd:   stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   + dy }, fittedBackgroundImage),
-        }
+        const polyPts = d.polygonPoints ?? []
+        const ns_full = stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y + dy }, fittedBackgroundImage)
+        const ne_full = stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   + dy }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_full, ne_full, polyPts)) return { ...d, currentStart: ns_full, currentEnd: ne_full }
+        const ns_x = stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y }, fittedBackgroundImage)
+        const ne_x = stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_x, ne_x, polyPts)) return { ...d, currentStart: ns_x, currentEnd: ne_x }
+        const ns_y = stageToNorm({ x: origStartStage.x, y: origStartStage.y + dy }, fittedBackgroundImage)
+        const ne_y = stageToNorm({ x: origEndStage.x,   y: origEndStage.y   + dy }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_y, ne_y, polyPts)) return { ...d, currentStart: ns_y, currentEnd: ne_y }
+        return d
       })
     }
 
@@ -1196,6 +1297,21 @@ function CadCanvas({
       input.select()
     }
   }, [avOrganizers, renamingAvOrganizerId])
+
+  useEffect(() => {
+    if (!renamingCustomBoardId) {
+      setCustomBoardRenameDraft('')
+      return
+    }
+    customBoardRenameOpenedAtRef.current = Date.now()
+    const board = customBoards?.find((b) => b.id === renamingCustomBoardId)
+    setCustomBoardRenameDraft(board?.label ?? '')
+    const input = customBoardRenameInputRef.current
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, [customBoards, renamingCustomBoardId])
 
   // Sync editing value when rename starts from outside (tree click).
   // Delete selected polygon on Delete key (select tool only).
@@ -1482,17 +1598,32 @@ function CadCanvas({
     const handlePointerMove = (event) => {
       const containerRect = containerRef.current?.getBoundingClientRect()
       if (!containerRect) return
-      const stagePoint = { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }
+      const rawStagePoint = { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }
       const targetPolygon = [...polygons].reverse().find((polygon) => {
         const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
-        return isPointInsidePolygon(stagePoint, stagePoints)
+        return isPointInsidePolygon(rawStagePoint, stagePoints)
       })
       setDraggingBoard((curr) => {
         if (!curr) return null
+        const usedPolygon = targetPolygon ?? polygons.find((p) => p.id === curr.polygonId)
+        let clampedStage = rawStagePoint
+        const wfEntry = EQUIPMENT_WIREFRAMES[curr.catalogItemId]
+        if (wfEntry && scaleDefinition && fittedBackgroundImage && usedPolygon) {
+          const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+          const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+          const wfW = (wfEntry.widthMm / 1000) * stagePixelsPerMeter
+          const wfH = (wfEntry.heightMm / 1000) * stagePixelsPerMeter
+          const polyStagePoints = usedPolygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+          const bounds = getPolygonBounds(polyStagePoints)
+          clampedStage = {
+            x: Math.max(bounds.minX + wfW / 2, Math.min(bounds.maxX - wfW / 2, rawStagePoint.x)),
+            y: Math.max(bounds.minY + wfH / 2, Math.min(bounds.maxY - wfH / 2, rawStagePoint.y)),
+          }
+        }
         return {
           ...curr,
-          point: stageToNorm(stagePoint, fittedBackgroundImage),
-          polygonId: targetPolygon?.id ?? null,
+          point: stageToNorm(clampedStage, fittedBackgroundImage),
+          polygonId: usedPolygon?.id ?? null,
         }
       })
     }
@@ -1510,43 +1641,281 @@ function CadCanvas({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [draggingBoard, fittedBackgroundImage, onBoardMove, polygons])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingBoard, fittedBackgroundImage, onBoardMove, polygons, scaleDefinition, loadedBackgroundImage])
 
   useEffect(() => {
-    const cancel = () => {
+    if (!avOrganizerDraftStart || !pendingAvOrganizerEquipment) return undefined
+    const handleMouseMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const rawCursor = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      if (fittedBackgroundImage) {
+        const polygon = polygons.find((p) => p.id === pendingAvOrganizerEquipment.polygonId)
+        if (polygon?.points?.length) {
+          const fixedNorm   = stageToNorm(avOrganizerDraftStart, fittedBackgroundImage)
+          const movingNorm  = stageToNorm(rawCursor, fittedBackgroundImage)
+          const clampedNorm = clampRectCornerToPolygon(fixedNorm, movingNorm, polygon.points)
+          setAvOrganizerDraftCursor(normToStage(clampedNorm, fittedBackgroundImage))
+          return
+        }
+      }
+      setAvOrganizerDraftCursor(rawCursor)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    return () => window.removeEventListener('mousemove', handleMouseMove)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avOrganizerDraftStart, pendingAvOrganizerEquipment])
+
+  useEffect(() => {
+    if (!pendingAvOrganizerEquipment) return undefined
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setAvOrganizerDraftStart(null)
+        setAvOrganizerDraftCursor(null)
+        onAvOrganizerCancel?.()
+      }
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [pendingAvOrganizerEquipment, onAvOrganizerCancel])
+
+  useEffect(() => {
+    if (!customBoardDraftStart || !pendingCustomBoardEquipment) return undefined
+    const handleMouseMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const rawCursor = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      if (fittedBackgroundImage) {
+        const polygon = polygons.find((p) => p.id === pendingCustomBoardEquipment.polygonId)
+        if (polygon?.points?.length) {
+          const fixedNorm   = stageToNorm(customBoardDraftStart, fittedBackgroundImage)
+          const movingNorm  = stageToNorm(rawCursor, fittedBackgroundImage)
+          const clampedNorm = clampRectCornerToPolygon(fixedNorm, movingNorm, polygon.points)
+          setCustomBoardDraftCursor(normToStage(clampedNorm, fittedBackgroundImage))
+          return
+        }
+      }
+      setCustomBoardDraftCursor(rawCursor)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    return () => window.removeEventListener('mousemove', handleMouseMove)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customBoardDraftStart, pendingCustomBoardEquipment])
+
+  useEffect(() => {
+    if (!pendingCustomBoardEquipment) return undefined
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setCustomBoardDraftStart(null)
+        setCustomBoardDraftCursor(null)
+        onCustomBoardCancel?.()
+      }
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [pendingCustomBoardEquipment, onCustomBoardCancel])
+
+  useEffect(() => {
+    if (!resizingAvOrganizer || !fittedBackgroundImage || !resizingAvOrganizer.corner || !resizingAvOrganizer.startPointerStage) return undefined
+    const handleMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const dx = px - resizingAvOrganizer.startPointerStage.x
+      const dy = py - resizingAvOrganizer.startPointerStage.y
+      const irs = normToStage(resizingAvOrganizer.initialRectStart, fittedBackgroundImage)
+      const ire = normToStage(resizingAvOrganizer.initialRectEnd, fittedBackgroundImage)
+      const MIN_PX = 10
+      let newSs = { ...irs }
+      let newSe = { ...ire }
+      const corner = resizingAvOrganizer.corner
+      if (corner === 'tl' || corner === 'bl') newSs.x = Math.min(irs.x + dx, ire.x - MIN_PX)
+      if (corner === 'tr' || corner === 'br') newSe.x = Math.max(ire.x + dx, irs.x + MIN_PX)
+      if (corner === 'tl' || corner === 'tr') newSs.y = Math.min(irs.y + dy, ire.y - MIN_PX)
+      if (corner === 'bl' || corner === 'br') newSe.y = Math.max(ire.y + dy, irs.y + MIN_PX)
+
+      let finalNs = stageToNorm(newSs, fittedBackgroundImage)
+      let finalNe = stageToNorm(newSe, fittedBackgroundImage)
+      const polyPts = resizingAvOrganizer.polygonPoints ?? []
+      if (polyPts.length >= 3) {
+        const irs_n = stageToNorm(irs, fittedBackgroundImage)
+        const ire_n = stageToNorm(ire, fittedBackgroundImage)
+        const fixedNorm  = corner === 'tl' ? ire_n : corner === 'tr' ? { x: irs_n.x, y: ire_n.y } : corner === 'bl' ? { x: ire_n.x, y: irs_n.y } : irs_n
+        const movingNorm = corner === 'tl' ? finalNs : corner === 'tr' ? { x: finalNe.x, y: finalNs.y } : corner === 'bl' ? { x: finalNs.x, y: finalNe.y } : finalNe
+        const cm = clampRectCornerToPolygon(fixedNorm, movingNorm, polyPts)
+        if (corner === 'tl') { finalNs = cm; finalNe = fixedNorm }
+        else if (corner === 'tr') { finalNs = { x: fixedNorm.x, y: cm.y }; finalNe = { x: cm.x, y: fixedNorm.y } }
+        else if (corner === 'bl') { finalNs = { x: cm.x, y: fixedNorm.y }; finalNe = { x: fixedNorm.x, y: cm.y } }
+        else { finalNs = fixedNorm; finalNe = cm }
+      }
+      setResizingAvOrganizer((r) => ({
+        ...r,
+        currentRectStart: finalNs,
+        currentRectEnd:   finalNe,
+      }))
+    }
+    const handleUp = () => {
+      setResizingAvOrganizer((r) => {
+        if (r?.currentRectStart && r?.currentRectEnd) {
+          onAvOrganizerMove?.({ organizerId: r.id, rectStart: r.currentRectStart, rectEnd: r.currentRectEnd })
+        }
+        return null
+      })
+    }
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+    return () => {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+  }, [resizingAvOrganizer, fittedBackgroundImage, onAvOrganizerMove])
+
+  useEffect(() => {
+    if (!draggingAvOrganizer || !fittedBackgroundImage) return undefined
+
+    const handlePointerMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const mouseStage = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      setDraggingAvOrganizer((d) => {
+        if (!d) return null
+        const origStartStage = normToStage(d.initialRectStart, fittedBackgroundImage)
+        const origEndStage   = normToStage(d.initialRectEnd,   fittedBackgroundImage)
+        const newStartX = mouseStage.x - d.dragOffset.x
+        const newStartY = mouseStage.y - d.dragOffset.y
+        const dx = newStartX - origStartStage.x
+        const dy = newStartY - origStartStage.y
+        const polyPts = d.polygonPoints ?? []
+        const ns_full = stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y + dy }, fittedBackgroundImage)
+        const ne_full = stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   + dy }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_full, ne_full, polyPts)) return { ...d, currentStart: ns_full, currentEnd: ne_full }
+        const ns_x = stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y }, fittedBackgroundImage)
+        const ne_x = stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_x, ne_x, polyPts)) return { ...d, currentStart: ns_x, currentEnd: ne_x }
+        const ns_y = stageToNorm({ x: origStartStage.x, y: origStartStage.y + dy }, fittedBackgroundImage)
+        const ne_y = stageToNorm({ x: origEndStage.x,   y: origEndStage.y   + dy }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_y, ne_y, polyPts)) return { ...d, currentStart: ns_y, currentEnd: ne_y }
+        return d
+      })
+    }
+
+    const handlePointerUp = () => {
+      setDraggingAvOrganizer((d) => {
+        if (!d?.currentStart || !d?.currentEnd) return null
+        onAvOrganizerMove?.({ organizerId: d.id, rectStart: d.currentStart, rectEnd: d.currentEnd })
+        return null
+      })
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [draggingAvOrganizer, fittedBackgroundImage, onAvOrganizerMove])
+
+  useEffect(() => {
+    const cancelHoldOnRelease = () => {
       if (avOrganizerHoldTimerRef.current) {
         window.clearTimeout(avOrganizerHoldTimerRef.current)
         avOrganizerHoldTimerRef.current = null
       }
     }
-    window.addEventListener('pointerup', cancel)
-    return () => window.removeEventListener('pointerup', cancel)
+    window.addEventListener('pointerup', cancelHoldOnRelease)
+    return () => window.removeEventListener('pointerup', cancelHoldOnRelease)
   }, [])
 
   useEffect(() => {
-    if (!draggingAvOrganizer) return undefined
-    const handlePointerMove = (event) => {
-      const containerRect = containerRef.current?.getBoundingClientRect()
-      if (!containerRect) return
-      const stagePoint = { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }
-      const targetPolygon = [...polygons].reverse().find((polygon) => {
-        const stagePoints = polygon.points.map((point) => normToStage(point, fittedBackgroundImage))
-        return isPointInsidePolygon(stagePoint, stagePoints)
-      })
-      setDraggingAvOrganizer((curr) => {
-        if (!curr) return null
-        return {
-          ...curr,
-          point: stageToNorm(stagePoint, fittedBackgroundImage),
-          polygonId: targetPolygon?.id ?? null,
+    if (!resizingCustomBoard || !fittedBackgroundImage || !resizingCustomBoard.corner || !resizingCustomBoard.startPointerStage) return undefined
+    const handleMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+      const dx = px - resizingCustomBoard.startPointerStage.x
+      const dy = py - resizingCustomBoard.startPointerStage.y
+      const irs = normToStage(resizingCustomBoard.initialRectStart, fittedBackgroundImage)
+      const ire = normToStage(resizingCustomBoard.initialRectEnd, fittedBackgroundImage)
+      const MIN_PX = 10
+      let newSs = { ...irs }
+      let newSe = { ...ire }
+      const corner = resizingCustomBoard.corner
+      if (corner === 'tl' || corner === 'bl') newSs.x = Math.min(irs.x + dx, ire.x - MIN_PX)
+      if (corner === 'tr' || corner === 'br') newSe.x = Math.max(ire.x + dx, irs.x + MIN_PX)
+      if (corner === 'tl' || corner === 'tr') newSs.y = Math.min(irs.y + dy, ire.y - MIN_PX)
+      if (corner === 'bl' || corner === 'br') newSe.y = Math.max(ire.y + dy, irs.y + MIN_PX)
+      let finalNs = stageToNorm(newSs, fittedBackgroundImage)
+      let finalNe = stageToNorm(newSe, fittedBackgroundImage)
+      const polyPts = resizingCustomBoard.polygonPoints ?? []
+      if (polyPts.length >= 3) {
+        const irs_n = stageToNorm(irs, fittedBackgroundImage)
+        const ire_n = stageToNorm(ire, fittedBackgroundImage)
+        const fixedNorm  = corner === 'tl' ? ire_n : corner === 'tr' ? { x: irs_n.x, y: ire_n.y } : corner === 'bl' ? { x: ire_n.x, y: irs_n.y } : irs_n
+        const movingNorm = corner === 'tl' ? finalNs : corner === 'tr' ? { x: finalNe.x, y: finalNs.y } : corner === 'bl' ? { x: finalNs.x, y: finalNe.y } : finalNe
+        const cm = clampRectCornerToPolygon(fixedNorm, movingNorm, polyPts)
+        if (corner === 'tl') { finalNs = cm; finalNe = fixedNorm }
+        else if (corner === 'tr') { finalNs = { x: fixedNorm.x, y: cm.y }; finalNe = { x: cm.x, y: fixedNorm.y } }
+        else if (corner === 'bl') { finalNs = { x: cm.x, y: fixedNorm.y }; finalNe = { x: fixedNorm.x, y: cm.y } }
+        else { finalNs = fixedNorm; finalNe = cm }
+      }
+      setResizingCustomBoard((r) => ({ ...r, currentRectStart: finalNs, currentRectEnd: finalNe }))
+    }
+    const handleUp = () => {
+      setResizingCustomBoard((r) => {
+        if (r?.currentRectStart && r?.currentRectEnd) {
+          onCustomBoardMove?.({ boardId: r.id, rectStart: r.currentRectStart, rectEnd: r.currentRectEnd })
         }
+        return null
+      })
+    }
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+    return () => {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+  }, [resizingCustomBoard, fittedBackgroundImage, onCustomBoardMove])
+
+  useEffect(() => {
+    if (!draggingCustomBoard || !fittedBackgroundImage) return undefined
+    const handlePointerMove = (event) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const mouseStage = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      setDraggingCustomBoard((d) => {
+        if (!d) return null
+        const origStartStage = normToStage(d.initialRectStart, fittedBackgroundImage)
+        const origEndStage   = normToStage(d.initialRectEnd,   fittedBackgroundImage)
+        const newStartX = mouseStage.x - d.dragOffset.x
+        const newStartY = mouseStage.y - d.dragOffset.y
+        const dx = newStartX - origStartStage.x
+        const dy = newStartY - origStartStage.y
+        const polyPts = d.polygonPoints ?? []
+        const ns_full = stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y + dy }, fittedBackgroundImage)
+        const ne_full = stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   + dy }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_full, ne_full, polyPts)) return { ...d, currentStart: ns_full, currentEnd: ne_full }
+        const ns_x = stageToNorm({ x: origStartStage.x + dx, y: origStartStage.y }, fittedBackgroundImage)
+        const ne_x = stageToNorm({ x: origEndStage.x   + dx, y: origEndStage.y   }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_x, ne_x, polyPts)) return { ...d, currentStart: ns_x, currentEnd: ne_x }
+        const ns_y = stageToNorm({ x: origStartStage.x, y: origStartStage.y + dy }, fittedBackgroundImage)
+        const ne_y = stageToNorm({ x: origEndStage.x,   y: origEndStage.y   + dy }, fittedBackgroundImage)
+        if (rectFitsInPolygon(ns_y, ne_y, polyPts)) return { ...d, currentStart: ns_y, currentEnd: ne_y }
+        return d
       })
     }
     const handlePointerUp = () => {
-      setDraggingAvOrganizer((curr) => {
-        if (curr?.polygonId) {
-          onAvOrganizerMove?.({ organizerId: curr.id, point: curr.point, polygonId: curr.polygonId })
-        }
+      setDraggingCustomBoard((d) => {
+        if (!d?.currentStart || !d?.currentEnd) return null
+        onCustomBoardMove?.({ boardId: d.id, rectStart: d.currentStart, rectEnd: d.currentEnd })
         return null
       })
     }
@@ -1556,7 +1925,40 @@ function CadCanvas({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [draggingAvOrganizer, fittedBackgroundImage, onAvOrganizerMove, polygons])
+  }, [draggingCustomBoard, fittedBackgroundImage, onCustomBoardMove])
+
+  useEffect(() => {
+    const cancelHoldOnRelease = () => {
+      if (customBoardHoldTimerRef.current) {
+        window.clearTimeout(customBoardHoldTimerRef.current)
+        customBoardHoldTimerRef.current = null
+      }
+    }
+    window.addEventListener('pointerup', cancelHoldOnRelease)
+    return () => window.removeEventListener('pointerup', cancelHoldOnRelease)
+  }, [])
+
+  useEffect(() => {
+    if (!activeDropdownAvOrganizerId) return undefined
+    const handleOutsideClick = (event) => {
+      if (!event.target.closest(`[data-av-org-id="${activeDropdownAvOrganizerId}"]`)) {
+        setActiveDropdownAvOrganizerId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick, true)
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true)
+  }, [activeDropdownAvOrganizerId])
+
+  useEffect(() => {
+    if (!activeDropdownCustomBoardId) return undefined
+    const handleOutsideClick = (event) => {
+      if (!event.target.closest(`[data-custom-board-id="${activeDropdownCustomBoardId}"]`)) {
+        setActiveDropdownCustomBoardId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick, true)
+    return () => document.removeEventListener('mousedown', handleOutsideClick, true)
+  }, [activeDropdownCustomBoardId])
 
   useEffect(() => {
     if (!draggingPolygon || !fittedBackgroundImage) {
@@ -1628,9 +2030,15 @@ function CadCanvas({
             boardId: board.id,
             point: shiftPoint(board.point),
           })),
-          avOrganizerPoints: (draggingPolygon.initialAvOrganizerPoints ?? []).map((org) => ({
+          avOrganizerRects: (draggingPolygon.initialAvOrganizerRects ?? []).map((org) => ({
             avOrganizerId: org.id,
-            point: shiftPoint(org.point),
+            rectStart: shiftPoint(org.rectStart),
+            rectEnd:   shiftPoint(org.rectEnd),
+          })),
+          customBoardRects: (draggingPolygon.initialCustomBoardRects ?? []).map((b) => ({
+            customBoardId: b.id,
+            rectStart: shiftPoint(b.rectStart),
+            rectEnd:   shiftPoint(b.rectEnd),
           })),
           curtainRects: (draggingPolygon.initialCurtainRects ?? []).map((c) => ({
             curtainId: c.id,
@@ -1718,9 +2126,15 @@ function CadCanvas({
             boardId: board.id,
             point: shiftPoint(board.point),
           })),
-          avOrganizerPoints: pd.initialAvOrganizerPoints.map((org) => ({
+          avOrganizerRects: pd.initialAvOrganizerRects.map((org) => ({
             avOrganizerId: org.id,
-            point: shiftPoint(org.point),
+            rectStart: shiftPoint(org.rectStart),
+            rectEnd:   shiftPoint(org.rectEnd),
+          })),
+          customBoardRects: (pd.initialCustomBoardRects ?? []).map((b) => ({
+            customBoardId: b.id,
+            rectStart: shiftPoint(b.rectStart),
+            rectEnd:   shiftPoint(b.rectEnd),
           })),
           curtainRects: pd.initialCurtainRects.map((c) => ({
             curtainId: c.id,
@@ -2258,9 +2672,12 @@ function CadCanvas({
         initialBoardPoints: (automationBoards ?? [])
           .filter((b) => b.polygonId === pid)
           .map((b) => ({ id: b.id, point: b.point })),
-        initialAvOrganizerPoints: (avOrganizers ?? [])
+        initialAvOrganizerRects: (avOrganizers ?? [])
           .filter((org) => org.polygonId === pid)
-          .map((org) => ({ id: org.id, point: org.point })),
+          .map((org) => ({ id: org.id, rectStart: org.rectStart, rectEnd: org.rectEnd })),
+        initialCustomBoardRects: (customBoards ?? [])
+          .filter((b) => b.polygonId === pid)
+          .map((b) => ({ id: b.id, rectStart: b.rectStart, rectEnd: b.rectEnd })),
         initialCurtainRects: (placedCurtains ?? [])
           .filter((c) => c.polygonId === pid)
           .map((c) => ({ id: c.id, rectStart: c.rectStart, rectEnd: c.rectEnd })),
@@ -2332,9 +2749,12 @@ function CadCanvas({
           initialBoardPoints: (automationBoards ?? [])
             .filter((board) => board.polygonId === polygonId)
             .map((board) => ({ id: board.id, point: board.point })),
-          initialAvOrganizerPoints: (avOrganizers ?? [])
+          initialAvOrganizerRects: (avOrganizers ?? [])
             .filter((org) => org.polygonId === polygonId)
-            .map((org) => ({ id: org.id, point: org.point })),
+            .map((org) => ({ id: org.id, rectStart: org.rectStart, rectEnd: org.rectEnd })),
+          initialCustomBoardRects: (customBoards ?? [])
+            .filter((b) => b.polygonId === polygonId)
+            .map((b) => ({ id: b.id, rectStart: b.rectStart, rectEnd: b.rectEnd })),
           initialCurtainRects: (placedCurtains ?? [])
             .filter((c) => c.polygonId === polygonId)
             .map((c) => ({ id: c.id, rectStart: c.rectStart, rectEnd: c.rectEnd })),
@@ -2542,6 +2962,7 @@ function CadCanvas({
     boardHoldTimerRef.current = window.setTimeout(() => {
       setDraggingBoard({
         id: board.id,
+        catalogItemId: board.catalogItemId,
         point: stageToNorm(stagePoint, fittedBackgroundImage),
         polygonId: board.polygonId,
       })
@@ -2575,31 +2996,33 @@ function CadCanvas({
   const handleAvOrganizerMouseDown = (event, org) => {
     if (activeTool !== 'select') return
     if (event.button !== 0) return
+    if (resizingAvOrganizer?.id === org.id) return
     event.stopPropagation()
     event.preventDefault()
 
-    if (selectedAvOrganizerId !== org.id) {
-      onAvOrganizerSelect?.(org.id)
-      return
-    }
-
-    if (event.detail >= 2) return
-
+    onAvOrganizerSelect?.(org.id)
+    if (!fittedBackgroundImage) return
     const container = containerRef.current
     if (!container) return
-    const bounds = container.getBoundingClientRect()
-    const stagePoint = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
-
-    if (avOrganizerHoldTimerRef.current) window.clearTimeout(avOrganizerHoldTimerRef.current)
-
+    const ss = normToStage(org.rectStart, fittedBackgroundImage)
+    const rect = container.getBoundingClientRect()
+    const dragOffset = {
+      x: event.clientX - rect.left - ss.x,
+      y: event.clientY - rect.top  - ss.y,
+    }
+    const avOrgDragPolygon = polygons.find((p) => p.id === org.polygonId)
     avOrganizerHoldTimerRef.current = window.setTimeout(() => {
+      avOrganizerHoldTimerRef.current = null
       setDraggingAvOrganizer({
         id: org.id,
-        point: stageToNorm(stagePoint, fittedBackgroundImage),
-        polygonId: org.polygonId,
+        initialRectStart: org.rectStart,
+        initialRectEnd:   org.rectEnd,
+        polygonPoints: avOrgDragPolygon?.points ?? [],
+        dragOffset,
+        currentStart: null,
+        currentEnd:   null,
       })
-      avOrganizerHoldTimerRef.current = null
-    }, EQUIPMENT_HOLD_TO_DRAG_MS)
+    }, 180)
   }
 
   const openAvOrganizerContextMenu = (event, organizerId) => {
@@ -2615,9 +3038,59 @@ function CadCanvas({
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
     setEquipmentContextMenu(null)
     setPolygonContextMenu(null)
-    setAvOrganizerSlotContextMenu(null)
     setAvOrganizerContextMenu({
       organizerId,
+      x: Math.max(4, x),
+      y: Math.max(4, y),
+    })
+  }
+
+  const handleCustomBoardMouseDown = (event, board) => {
+    if (activeTool !== 'select') return
+    if (event.button !== 0) return
+    if (resizingCustomBoard?.id === board.id) return
+    event.stopPropagation()
+    event.preventDefault()
+    onCustomBoardSelect?.(board.id)
+    if (!fittedBackgroundImage) return
+    const container = containerRef.current
+    if (!container) return
+    const ss = normToStage(board.rectStart, fittedBackgroundImage)
+    const rect = container.getBoundingClientRect()
+    const dragOffset = {
+      x: event.clientX - rect.left - ss.x,
+      y: event.clientY - rect.top  - ss.y,
+    }
+    const cbDragPolygon = polygons.find((p) => p.id === board.polygonId)
+    customBoardHoldTimerRef.current = window.setTimeout(() => {
+      customBoardHoldTimerRef.current = null
+      setDraggingCustomBoard({
+        id: board.id,
+        initialRectStart: board.rectStart,
+        initialRectEnd:   board.rectEnd,
+        polygonPoints: cbDragPolygon?.points ?? [],
+        dragOffset,
+        currentStart: null,
+        currentEnd:   null,
+      })
+    }, 180)
+  }
+
+  const openCustomBoardContextMenu = (event, boardId) => {
+    if (activeTool !== 'select') return
+    const container = containerRef.current
+    if (!container) return
+    event.preventDefault()
+    event.stopPropagation()
+    const bounds = container.getBoundingClientRect()
+    const menuWidth = 172
+    const menuHeight = 90
+    const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
+    const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
+    setEquipmentContextMenu(null)
+    setPolygonContextMenu(null)
+    setCustomBoardContextMenu({
+      boardId,
       x: Math.max(4, x),
       y: Math.max(4, y),
     })
@@ -2753,7 +3226,7 @@ function CadCanvas({
     const targetElement = event.target
     if (targetElement instanceof Element) {
       const isInsideOverlay = targetElement.closest(
-        '.cad-equipment-overlay, .cad-scale-overlay, .cad-environment-overlay',
+        '.cad-equipment-overlay, .cad-scale-overlay, .cad-environment-overlay, .cad-board-dropdown',
       )
       if (isInsideOverlay) {
         return
@@ -2809,20 +3282,124 @@ function CadCanvas({
   }
 
   const handleCanvasMouseDownCapture = (event) => {
+    if (pendingAvOrganizerEquipment && fittedBackgroundImage && event.button === 0) {
+      const container = containerRef.current
+      if (container) {
+        const rect = container.getBoundingClientRect()
+        const stagePoint = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+        const avOrgPolygon = polygons.find((p) => p.id === pendingAvOrganizerEquipment.polygonId)
+        if (!avOrganizerDraftStart) {
+          if (avOrgPolygon?.points?.length) {
+            const normPt = stageToNorm(stagePoint, fittedBackgroundImage)
+            if (!isPointInsidePolygon(normPt, avOrgPolygon.points)) {
+              event.preventDefault()
+              event.stopPropagation()
+              return
+            }
+          }
+          setAvOrganizerDraftStart(stagePoint)
+          setAvOrganizerDraftCursor(stagePoint)
+        } else {
+          let finalPoint = stagePoint
+          if (avOrgPolygon?.points?.length) {
+            const fixedNorm   = stageToNorm(avOrganizerDraftStart, fittedBackgroundImage)
+            const movingNorm  = stageToNorm(stagePoint, fittedBackgroundImage)
+            const clampedNorm = clampRectCornerToPolygon(fixedNorm, movingNorm, avOrgPolygon.points)
+            finalPoint = normToStage(clampedNorm, fittedBackgroundImage)
+          }
+          const stageW = Math.abs(finalPoint.x - avOrganizerDraftStart.x)
+          const stageH = Math.abs(finalPoint.y - avOrganizerDraftStart.y)
+          if (stageW > 4 && stageH > 4) {
+            const normStart = stageToNorm(avOrganizerDraftStart, fittedBackgroundImage)
+            const normEnd   = stageToNorm(finalPoint, fittedBackgroundImage)
+            onAvOrganizerRectDrawn?.({
+              rectStart: { x: Math.min(normStart.x, normEnd.x), y: Math.min(normStart.y, normEnd.y) },
+              rectEnd:   { x: Math.max(normStart.x, normEnd.x), y: Math.max(normStart.y, normEnd.y) },
+            })
+          }
+          setAvOrganizerDraftStart(null)
+          setAvOrganizerDraftCursor(null)
+        }
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
+    if (pendingCustomBoardEquipment && fittedBackgroundImage && event.button === 0) {
+      const container = containerRef.current
+      if (container) {
+        const rect = container.getBoundingClientRect()
+        const stagePoint = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+        const cbPolygon = polygons.find((p) => p.id === pendingCustomBoardEquipment.polygonId)
+        if (!customBoardDraftStart) {
+          if (cbPolygon?.points?.length) {
+            const normPt = stageToNorm(stagePoint, fittedBackgroundImage)
+            if (!isPointInsidePolygon(normPt, cbPolygon.points)) {
+              event.preventDefault()
+              event.stopPropagation()
+              return
+            }
+          }
+          setCustomBoardDraftStart(stagePoint)
+          setCustomBoardDraftCursor(stagePoint)
+        } else {
+          let finalPoint = stagePoint
+          if (cbPolygon?.points?.length) {
+            const fixedNorm   = stageToNorm(customBoardDraftStart, fittedBackgroundImage)
+            const movingNorm  = stageToNorm(stagePoint, fittedBackgroundImage)
+            const clampedNorm = clampRectCornerToPolygon(fixedNorm, movingNorm, cbPolygon.points)
+            finalPoint = normToStage(clampedNorm, fittedBackgroundImage)
+          }
+          const stageW = Math.abs(finalPoint.x - customBoardDraftStart.x)
+          const stageH = Math.abs(finalPoint.y - customBoardDraftStart.y)
+          if (stageW > 4 && stageH > 4) {
+            const normStart = stageToNorm(customBoardDraftStart, fittedBackgroundImage)
+            const normEnd   = stageToNorm(finalPoint, fittedBackgroundImage)
+            onCustomBoardRectDrawn?.({
+              rectStart: { x: Math.min(normStart.x, normEnd.x), y: Math.min(normStart.y, normEnd.y) },
+              rectEnd:   { x: Math.max(normStart.x, normEnd.x), y: Math.max(normStart.y, normEnd.y) },
+            })
+          }
+          setCustomBoardDraftStart(null)
+          setCustomBoardDraftCursor(null)
+        }
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
     if (pendingCurtainEquipment && fittedBackgroundImage && event.button === 0) {
       const container = containerRef.current
       if (container) {
         const rect = container.getBoundingClientRect()
         const stagePoint = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+        const curtainPolygon = polygons.find((p) => p.id === pendingCurtainEquipment.polygonId)
         if (!curtainDraftStart) {
+          if (curtainPolygon?.points?.length) {
+            const normPt = stageToNorm(stagePoint, fittedBackgroundImage)
+            if (!isPointInsidePolygon(normPt, curtainPolygon.points)) {
+              event.preventDefault()
+              event.stopPropagation()
+              return
+            }
+          }
           setCurtainDraftStart(stagePoint)
           setCurtainDraftCursor(stagePoint)
         } else {
-          const stageW = Math.abs(stagePoint.x - curtainDraftStart.x)
-          const stageH = Math.abs(stagePoint.y - curtainDraftStart.y)
+          let finalPoint = stagePoint
+          if (curtainPolygon?.points?.length) {
+            const fixedNorm   = stageToNorm(curtainDraftStart, fittedBackgroundImage)
+            const movingNorm  = stageToNorm(stagePoint, fittedBackgroundImage)
+            const clampedNorm = clampRectCornerToPolygon(fixedNorm, movingNorm, curtainPolygon.points)
+            finalPoint = normToStage(clampedNorm, fittedBackgroundImage)
+          }
+          const stageW = Math.abs(finalPoint.x - curtainDraftStart.x)
+          const stageH = Math.abs(finalPoint.y - curtainDraftStart.y)
           if (stageW > 4 && stageH > 4) {
             const normStart = stageToNorm(curtainDraftStart, fittedBackgroundImage)
-            const normEnd = stageToNorm(stagePoint, fittedBackgroundImage)
+            const normEnd = stageToNorm(finalPoint, fittedBackgroundImage)
             onCurtainRectDrawn?.({
               rectStart: { x: Math.min(normStart.x, normEnd.x), y: Math.min(normStart.y, normEnd.y) },
               rectEnd:   { x: Math.max(normStart.x, normEnd.x), y: Math.max(normStart.y, normEnd.y) },
@@ -2936,6 +3513,14 @@ function CadCanvas({
     () => Math.max(16, Math.ceil(measureLabelText(curtainRenameDraft || ' ', 11)) + 10),
     [curtainRenameDraft],
   )
+  const avOrganizerRenameInputWidth = useMemo(
+    () => Math.max(16, Math.ceil(measureLabelText(avOrganizerRenameDraft || ' ', 11)) + 10),
+    [avOrganizerRenameDraft],
+  )
+  const customBoardRenameInputWidth = useMemo(
+    () => Math.max(16, Math.ceil(measureLabelText(customBoardRenameDraft || ' ', 11)) + 10),
+    [customBoardRenameDraft],
+  )
 
   const equipLabelStage = zoom >= EQUIP_TEXT_ZOOM_FULL ? 'full'
     : zoom >= EQUIP_TEXT_ZOOM_TRUNCATED ? 'truncated' : 'hidden'
@@ -2951,6 +3536,47 @@ function CadCanvas({
     const HALF = EQUIP_ICON_SIZE / 2  // 6.5
     const result = {}
 
+    // Pixel dims of an equipment's wireframe (null when not applicable)
+    const getWireframeDims = (eq) => {
+      if (eq._rectDims) return eq._rectDims
+      const wfEntry = EQUIPMENT_WIREFRAMES[eq.catalogItemId] ?? null
+      if (!wfEntry || !scaleDefinition) return null
+      const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+      const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+      return {
+        width:  (wfEntry.widthMm  / 1000) * stagePixelsPerMeter,
+        height: (wfEntry.heightMm / 1000) * stagePixelsPerMeter,
+      }
+    }
+
+    // Stage pixel dimensions of a rect-based item
+    const getRectStageDims = (item) => {
+      const s = normToStage(item.rectStart, fittedBackgroundImage)
+      const e = normToStage(item.rectEnd,   fittedBackgroundImage)
+      return { width: Math.abs(e.x - s.x), height: Math.abs(e.y - s.y) }
+    }
+
+    // Stage center of a wireframe after the inward wall-snap offset
+    const getRenderCenter = (eq, cx, cy, wfDims) => {
+      if (!wfDims || !eq.wallNormal) return { renderCX: cx, renderCY: cy }
+      const stageOrigin = normToStage({ x: 0, y: 0 }, fittedBackgroundImage)
+      const stageTip    = normToStage({ x: eq.wallNormal.x, y: eq.wallNormal.y }, fittedBackgroundImage)
+      const wnSX = stageTip.x - stageOrigin.x
+      const wnSY = stageTip.y - stageOrigin.y
+      const wnSLen = Math.hypot(wnSX, wnSY)
+      if (wnSLen === 0) return { renderCX: cx, renderCY: cy }
+      const wnNX = wnSX / wnSLen
+      const wnNY = wnSY / wnSLen
+      const halfExtent = Math.abs(wnNX) * (wfDims.width / 2) + Math.abs(wnNY) * (wfDims.height / 2)
+      return { renderCX: cx + wnNX * halfExtent, renderCY: cy + wnNY * halfExtent }
+    }
+
+    // Helper: normalized center of a rect-based item
+    const getRectCenterNorm = (item) => ({
+      x: (item.rectStart.x + item.rectEnd.x) / 2,
+      y: (item.rectStart.y + item.rectEnd.y) / 2,
+    })
+
     // Group by polygonId so collision detection is per-environment
     const byPolygon = new Map()
     for (const eq of (placedEquipments ?? [])) {
@@ -2958,6 +3584,27 @@ function CadCanvas({
       const key = eq.polygonId ?? '__none__'
       if (!byPolygon.has(key)) byPolygon.set(key, [])
       byPolygon.get(key).push(eq)
+    }
+    // Add boards, AV organizers, custom boards, and curtains as virtual items
+    for (const b of (automationBoards ?? [])) {
+      const key = b.polygonId ?? '__none__'
+      if (!byPolygon.has(key)) byPolygon.set(key, [])
+      byPolygon.get(key).push({ id: b.id, polygonId: b.polygonId, point: b.point, label: b.label, catalogItemId: b.catalogItemId, wallNormal: null })
+    }
+    for (const o of (avOrganizers ?? [])) {
+      const key = o.polygonId ?? '__none__'
+      if (!byPolygon.has(key)) byPolygon.set(key, [])
+      byPolygon.get(key).push({ id: o.id, polygonId: o.polygonId, point: getRectCenterNorm(o), label: o.label, catalogItemId: null, wallNormal: null, _rectDims: getRectStageDims(o) })
+    }
+    for (const cb of (customBoards ?? [])) {
+      const key = cb.polygonId ?? '__none__'
+      if (!byPolygon.has(key)) byPolygon.set(key, [])
+      byPolygon.get(key).push({ id: cb.id, polygonId: cb.polygonId, point: getRectCenterNorm(cb), label: cb.label, catalogItemId: null, wallNormal: null, _rectDims: getRectStageDims(cb) })
+    }
+    for (const c of (placedCurtains ?? [])) {
+      const key = c.polygonId ?? '__none__'
+      if (!byPolygon.has(key)) byPolygon.set(key, [])
+      byPolygon.get(key).push({ id: c.id, polygonId: c.polygonId, point: getRectCenterNorm(c), label: c.label, catalogItemId: null, wallNormal: null, _rectDims: getRectStageDims(c) })
     }
 
     for (const [polygonId, eqs] of byPolygon) {
@@ -2967,11 +3614,36 @@ function CadCanvas({
       // Pre-compute stage positions to avoid repeated conversions in inner loops
       const stagePts = eqs.map((eq) => normToStage(eq.point, fittedBackgroundImage))
 
+      // Pre-compute wireframe dims and rendered centers for all equipment in this polygon
+      const wfData = eqs.map((eq, idx) => {
+        const wfDims = getWireframeDims(eq)
+        const { renderCX, renderCY } = getRenderCenter(eq, stagePts[idx].x, stagePts[idx].y, wfDims)
+        return { wfDims, renderCX, renderCY }
+      })
+
+      // Pre-compute the visual bbox of each equipment (wireframe or icon) for sibling overlap checks
+      const iconBoxes = eqs.map((eq, idx) => {
+        const { wfDims, renderCX, renderCY } = wfData[idx]
+        return wfDims
+          ? { x: renderCX - wfDims.width / 2, y: renderCY - wfDims.height / 2, w: wfDims.width, h: wfDims.height }
+          : { x: stagePts[idx].x - HALF, y: stagePts[idx].y - HALF, w: EQUIP_ICON_SIZE, h: EQUIP_ICON_SIZE }
+      })
+
       const placedBoxes = []  // bboxes of already-committed labels
 
       eqs.forEach((eq, idx) => {
-        const cx = stagePts[idx].x
-        const cy = stagePts[idx].y
+        const { wfDims, renderCX, renderCY } = wfData[idx]
+        // cx/cy = rendered center in stage coords; halfW/H = half of the visual footprint
+        const cx     = renderCX
+        const cy     = renderCY
+        const halfW  = wfDims ? wfDims.width  / 2 : HALF
+        const halfH  = wfDims ? wfDims.height / 2 : HALF
+        // Local coords of the div's center and size (relative to div top-left, after translate(-50%,-50%))
+        const localCX = halfW
+        const localCY = halfH
+        const divW    = halfW * 2
+        const divH    = halfH * 2
+
         const rawW = Math.ceil(measureLabelText(eq.label, 11))
 
         // In truncated mode, scale the label width proportionally to zoom
@@ -2981,32 +3653,33 @@ function CadCanvas({
         const maxW = Math.max(20, Math.round(rawW * truncRatio))
         const w = Math.min(rawW, maxW)
 
-        // 8 candidate positions: { left, top } relative to icon div top-left, + stage bbox
+        // 8 candidate positions: { left, top } relative to div top-left, + stage bbox
+        // For wireframes the div is sized to the wireframe; for icons it is EQUIP_ICON_SIZE × EQUIP_ICON_SIZE.
         const candidates = [
           // 1. Below
-          { left: HALF - w / 2,             top: EQUIP_ICON_SIZE + EQUIP_LABEL_GAP,
-            bbox: { x: cx - w / 2,           y: cy + HALF + EQUIP_LABEL_GAP, w, h: EQUIP_LABEL_H } },
+          { left: localCX - w / 2,         top: divH + EQUIP_LABEL_GAP,
+            bbox: { x: cx - w / 2,          y: cy + halfH + EQUIP_LABEL_GAP, w, h: EQUIP_LABEL_H } },
           // 2. Above
-          { left: HALF - w / 2,             top: -EQUIP_LABEL_H - EQUIP_LABEL_GAP,
-            bbox: { x: cx - w / 2,           y: cy - HALF - EQUIP_LABEL_GAP - EQUIP_LABEL_H, w, h: EQUIP_LABEL_H } },
-          // 3. Right (current default)
-          { left: EQUIP_ICON_SIZE + EQUIP_LABEL_GAP, top: HALF - EQUIP_LABEL_H / 2,
-            bbox: { x: cx + HALF + EQUIP_LABEL_GAP, y: cy - EQUIP_LABEL_H / 2, w, h: EQUIP_LABEL_H } },
+          { left: localCX - w / 2,         top: -EQUIP_LABEL_H - EQUIP_LABEL_GAP,
+            bbox: { x: cx - w / 2,          y: cy - halfH - EQUIP_LABEL_GAP - EQUIP_LABEL_H, w, h: EQUIP_LABEL_H } },
+          // 3. Right (fallback)
+          { left: divW + EQUIP_LABEL_GAP,  top: localCY - EQUIP_LABEL_H / 2,
+            bbox: { x: cx + halfW + EQUIP_LABEL_GAP, y: cy - EQUIP_LABEL_H / 2, w, h: EQUIP_LABEL_H } },
           // 4. Left
-          { left: -w - EQUIP_LABEL_GAP,     top: HALF - EQUIP_LABEL_H / 2,
-            bbox: { x: cx - HALF - EQUIP_LABEL_GAP - w, y: cy - EQUIP_LABEL_H / 2, w, h: EQUIP_LABEL_H } },
+          { left: -w - EQUIP_LABEL_GAP,    top: localCY - EQUIP_LABEL_H / 2,
+            bbox: { x: cx - halfW - EQUIP_LABEL_GAP - w, y: cy - EQUIP_LABEL_H / 2, w, h: EQUIP_LABEL_H } },
           // 5. Bottom-right
-          { left: EQUIP_ICON_SIZE + EQUIP_LABEL_GAP, top: EQUIP_ICON_SIZE + EQUIP_LABEL_GAP,
-            bbox: { x: cx + HALF + EQUIP_LABEL_GAP, y: cy + HALF + EQUIP_LABEL_GAP, w, h: EQUIP_LABEL_H } },
+          { left: divW + EQUIP_LABEL_GAP,  top: divH + EQUIP_LABEL_GAP,
+            bbox: { x: cx + halfW + EQUIP_LABEL_GAP, y: cy + halfH + EQUIP_LABEL_GAP, w, h: EQUIP_LABEL_H } },
           // 6. Bottom-left
-          { left: -w - EQUIP_LABEL_GAP,     top: EQUIP_ICON_SIZE + EQUIP_LABEL_GAP,
-            bbox: { x: cx - HALF - EQUIP_LABEL_GAP - w, y: cy + HALF + EQUIP_LABEL_GAP, w, h: EQUIP_LABEL_H } },
+          { left: -w - EQUIP_LABEL_GAP,    top: divH + EQUIP_LABEL_GAP,
+            bbox: { x: cx - halfW - EQUIP_LABEL_GAP - w, y: cy + halfH + EQUIP_LABEL_GAP, w, h: EQUIP_LABEL_H } },
           // 7. Top-right
-          { left: EQUIP_ICON_SIZE + EQUIP_LABEL_GAP, top: -EQUIP_LABEL_H - EQUIP_LABEL_GAP,
-            bbox: { x: cx + HALF + EQUIP_LABEL_GAP, y: cy - HALF - EQUIP_LABEL_GAP - EQUIP_LABEL_H, w, h: EQUIP_LABEL_H } },
+          { left: divW + EQUIP_LABEL_GAP,  top: -EQUIP_LABEL_H - EQUIP_LABEL_GAP,
+            bbox: { x: cx + halfW + EQUIP_LABEL_GAP, y: cy - halfH - EQUIP_LABEL_GAP - EQUIP_LABEL_H, w, h: EQUIP_LABEL_H } },
           // 8. Top-left
-          { left: -w - EQUIP_LABEL_GAP,     top: -EQUIP_LABEL_H - EQUIP_LABEL_GAP,
-            bbox: { x: cx - HALF - EQUIP_LABEL_GAP - w, y: cy - HALF - EQUIP_LABEL_GAP - EQUIP_LABEL_H, w, h: EQUIP_LABEL_H } },
+          { left: -w - EQUIP_LABEL_GAP,    top: -EQUIP_LABEL_H - EQUIP_LABEL_GAP,
+            bbox: { x: cx - halfW - EQUIP_LABEL_GAP - w, y: cy - halfH - EQUIP_LABEL_GAP - EQUIP_LABEL_H, w, h: EQUIP_LABEL_H } },
         ]
 
         let best = candidates[2]   // fallback: right
@@ -3027,12 +3700,10 @@ function CadCanvas({
           let overlap = 0
           for (const box of placedBoxes) overlap += computeOverlapArea(cand.bbox, box)
 
-          // Overlap against sibling icon bboxes
+          // Overlap against sibling visual bboxes (icon or wireframe)
           for (let j = 0; j < eqs.length; j++) {
             if (j === idx) continue
-            overlap += computeOverlapArea(cand.bbox, {
-              x: stagePts[j].x - HALF, y: stagePts[j].y - HALF, w: EQUIP_ICON_SIZE, h: EQUIP_ICON_SIZE,
-            })
+            overlap += computeOverlapArea(cand.bbox, iconBoxes[j])
           }
 
           if (overlap === 0) { best = cand; break }
@@ -3046,7 +3717,7 @@ function CadCanvas({
 
     return result
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedEquipments, polygons, fittedBackgroundImage, equipLabelStage, zoom, equipmentFilters])
+  }, [placedEquipments, automationBoards, avOrganizers, customBoards, placedCurtains, polygons, fittedBackgroundImage, equipLabelStage, zoom, equipmentFilters, scaleDefinition, loadedBackgroundImage])
   const polygonLabelPlacementById = useMemo(() => {
     const placements = {}
 
@@ -3060,7 +3731,7 @@ function CadCanvas({
 
   return (
     <div
-      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${SHAPE_DRAW_TOOLS.has(activeTool) || activeTool === 'polygon' || activeTool === 'ruler' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}${multiAddDraft ? ' is-multi-add' : ''}${pendingCurtainEquipment ? ' is-curtain-draw' : ''}`}
+      className={`cad-canvas-shell${activeTool === 'move' ? ' is-pan-tool' : ''}${SHAPE_DRAW_TOOLS.has(activeTool) || activeTool === 'polygon' || activeTool === 'ruler' ? ' is-draw-tool' : ''}${isMiddlePanning ? ' is-panning' : ''}${multiAddDraft ? ' is-multi-add' : ''}${pendingCurtainEquipment ? ' is-curtain-draw' : ''}${pendingAvOrganizerEquipment ? ' is-curtain-draw' : ''}${pendingCustomBoardEquipment ? ' is-curtain-draw' : ''}`}
       ref={containerRef}
       onMouseDownCapture={handleCanvasMouseDownCapture}
       onAuxClick={handleCanvasAuxClick}
@@ -3108,8 +3779,8 @@ function CadCanvas({
                 <Group key={`polygon-${index}-${polygon.points.length}`}>
                   <Line
                     points={flattenPoints(stagePoints)}
-                    stroke={isSelected ? SELECTED_POLYGON_COLOR : polygon.color}
-                    fill={hexToRgba(polygon.color, 0.25)}
+                    stroke={isSelected ? SELECTED_POLYGON_COLOR : '#1f1f1f'}
+                    fill={isSelected ? hexToRgba(SELECTED_POLYGON_COLOR, 0.08) : 'transparent'}
                     strokeWidth={POLYGON_LINE_STROKE}
                     closed
                     lineCap="round"
@@ -3571,6 +4242,34 @@ function CadCanvas({
                 listening={false}
               />
             ) : null}
+
+            {avOrganizerDraftStart && avOrganizerDraftCursor && pendingAvOrganizerEquipment ? (
+              <Rect
+                x={Math.min(avOrganizerDraftStart.x, avOrganizerDraftCursor.x)}
+                y={Math.min(avOrganizerDraftStart.y, avOrganizerDraftCursor.y)}
+                width={Math.abs(avOrganizerDraftCursor.x - avOrganizerDraftStart.x)}
+                height={Math.abs(avOrganizerDraftCursor.y - avOrganizerDraftStart.y)}
+                stroke="#2980b9"
+                strokeWidth={2}
+                dash={[6, 4]}
+                fill={hexToRgba('#2980b9', 0.08)}
+                listening={false}
+              />
+            ) : null}
+
+            {customBoardDraftStart && customBoardDraftCursor && pendingCustomBoardEquipment ? (
+              <Rect
+                x={Math.min(customBoardDraftStart.x, customBoardDraftCursor.x)}
+                y={Math.min(customBoardDraftStart.y, customBoardDraftCursor.y)}
+                width={Math.abs(customBoardDraftCursor.x - customBoardDraftStart.x)}
+                height={Math.abs(customBoardDraftCursor.y - customBoardDraftStart.y)}
+                stroke="#e67e22"
+                strokeWidth={2}
+                dash={[6, 4]}
+                fill={hexToRgba('#e67e22', 0.08)}
+                listening={false}
+              />
+            ) : null}
           </Layer>
         </Stage>
       </div>
@@ -3617,7 +4316,7 @@ function CadCanvas({
         const pixelY = stagePoint.y
         const isSelected = selectedEquipmentId === equipment.id || multiSelectedEquipmentIds.has(equipment.id)
 
-        const wireframeEntry = zoom >= 200 ? (EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null) : null
+        const wireframeEntry = EQUIPMENT_WIREFRAMES[equipment.catalogItemId] ?? null
         const showWireframe = wireframeEntry != null && scaleDefinition != null
         const wireframeDims = showWireframe ? (() => {
           const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
@@ -3628,12 +4327,35 @@ function CadCanvas({
           }
         })() : null
 
+        // Wall-snap wireframe: shift center inward so the outer edge sits on the wall
+        let renderPixelX = pixelX
+        let renderPixelY = pixelY
+        if (showWireframe && wireframeDims) {
+          const effectiveWallNormal = (draggingEquipment?.id === equipment.id && draggingEquipment?.wallNormal)
+            ? draggingEquipment.wallNormal
+            : equipment.wallNormal
+          if (effectiveWallNormal) {
+            const stageOrigin = normToStage({ x: 0, y: 0 }, fittedBackgroundImage)
+            const stageTip   = normToStage({ x: effectiveWallNormal.x, y: effectiveWallNormal.y }, fittedBackgroundImage)
+            const wnSX = stageTip.x - stageOrigin.x
+            const wnSY = stageTip.y - stageOrigin.y
+            const wnSLen = Math.hypot(wnSX, wnSY)
+            if (wnSLen > 0) {
+              const wnNX = wnSX / wnSLen
+              const wnNY = wnSY / wnSLen
+              const halfExtent = Math.abs(wnNX) * (wireframeDims.width / 2) + Math.abs(wnNY) * (wireframeDims.height / 2)
+              renderPixelX = pixelX + wnNX * halfExtent
+              renderPixelY = pixelY + wnNY * halfExtent
+            }
+          }
+        }
+
         return (
           <div
             key={equipment.id}
             className={`cad-equipment-placement${isSelected ? ' is-selected' : ''}${showWireframe ? ' cad-equipment-placement--wireframe' : ''}`}
             style={wireframeDims
-              ? { left: pixelX, top: pixelY, width: wireframeDims.width, height: wireframeDims.height }
+              ? { left: renderPixelX, top: renderPixelY, width: wireframeDims.width, height: wireframeDims.height }
               : { left: pixelX, top: pixelY }
             }
             onMouseDown={(event) => handleEquipmentMouseDown(event, equipment)}
@@ -3708,6 +4430,188 @@ function CadCanvas({
           return board.point
         })()
         const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
+        // ── Wireframe board (QA-6M / QA-12M) ────────────────────────────
+        const boardWireframeEntry = EQUIPMENT_WIREFRAMES[board.catalogItemId] ?? null
+        if (boardWireframeEntry && scaleDefinition && fittedBackgroundImage) {
+          const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+          const stagePixelsPerMeter = scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+          const wfWidth  = (boardWireframeEntry.widthMm  / 1000) * stagePixelsPerMeter
+          const wfHeight = (boardWireframeEntry.heightMm / 1000) * stagePixelsPerMeter
+
+          // Clamp center within polygon bounding box (visual + already clamped in drag handler)
+          const boardPolygon = polygons.find((p) => p.id === board.polygonId)
+          let clampedCX = stagePoint.x
+          let clampedCY = stagePoint.y
+          if (boardPolygon && boardPolygon.points.length > 0) {
+            const polyStagePoints = boardPolygon.points.map((p) => normToStage(p, fittedBackgroundImage))
+            const bounds = getPolygonBounds(polyStagePoints)
+            clampedCX = Math.max(bounds.minX + wfWidth / 2, Math.min(bounds.maxX - wfWidth / 2, clampedCX))
+            clampedCY = Math.max(bounds.minY + wfHeight / 2, Math.min(bounds.maxY - wfHeight / 2, clampedCY))
+          }
+
+          let triggerSide = 'right'
+          if (boardPolygon) {
+            const checkNorm = stageToNorm(
+              { x: clampedCX + wfWidth / 2 + 24, y: clampedCY },
+              fittedBackgroundImage,
+            )
+            if (!isPointInsidePolygon(checkNorm, boardPolygon.points)) {
+              triggerSide = 'left'
+            }
+          }
+
+          const isDroppable   = dragOverBoardWireframe?.boardId === board.id && dragOverBoardWireframe?.isValid
+          const isInvalidDrop = dragOverBoardWireframe?.boardId === board.id && !dragOverBoardWireframe?.isValid
+          const isDropdownOpen = activeDropdownBoardId === board.id
+          const filledSlots = board.slots
+            .map((slot, index) => ({ slot, index }))
+            .filter(({ slot }) => slot !== null)
+
+          return (
+            <div
+              key={board.id}
+              data-board-id={board.id}
+              className={`cad-board-placement cad-board-placement--wireframe${selectedBoardId === board.id ? ' is-selected' : ''}${isDroppable ? ' is-drop-target' : ''}${isInvalidDrop ? ' is-invalid-target' : ''}`}
+              style={{ left: clampedCX, top: clampedCY, width: wfWidth, height: wfHeight }}
+              onMouseDown={(event) => handleBoardMouseDown(event, board)}
+              onContextMenu={(event) => openBoardContextMenu(event, board.id)}
+              onDragOver={(event) => {
+                event.stopPropagation()
+                if (event.dataTransfer.types.includes('application/x-board-only-item')) {
+                  event.preventDefault()
+                  const isFull = board.slots.every((s) => s !== null)
+                  if (isFull) {
+                    event.dataTransfer.dropEffect = 'none'
+                    setDragOverBoardWireframe({ boardId: board.id, isValid: false })
+                  } else {
+                    event.dataTransfer.dropEffect = 'copy'
+                    setDragOverBoardWireframe({ boardId: board.id, isValid: true })
+                    if (activeDropdownBoardId !== board.id) setActiveDropdownBoardId(board.id)
+                  }
+                } else if (event.dataTransfer.types.includes('application/x-equipment-item')) {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'none'
+                  setDragOverBoardWireframe({ boardId: board.id, isValid: false })
+                }
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setDragOverBoardWireframe(null)
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setDragOverBoardWireframe(null)
+                try {
+                  const itemData = JSON.parse(event.dataTransfer.getData('application/x-equipment-item'))
+                  const catalogItemId = itemData?.catalogItemId ?? itemData?.id
+                  if (!itemData?.label || !isBoardOnlyItem(catalogItemId)) return
+                  const slotIndex = board.slots.findIndex((s) => s === null)
+                  if (slotIndex === -1) return
+                  onBoardSlotInstall?.({
+                    boardId: board.id,
+                    slotIndex,
+                    device: {
+                      id: `slot-${board.id}-${slotIndex}-${Date.now()}`,
+                      catalogItemId,
+                      label: itemData.label,
+                      iconSrc: itemData.iconSrc,
+                      iconKey: itemData.iconKey,
+                    },
+                  })
+                } catch {}
+              }}
+            >
+              <img
+                src={boardWireframeEntry.svgUrl}
+                alt=""
+                className="cad-board-placement__wireframe-img"
+                draggable={false}
+              />
+
+              {equipmentFilters?.text !== false && equipLabelStage !== 'hidden' && (
+                renamingBoardId === board.id ? (
+                  <input
+                    ref={boardRenameInputRef}
+                    className="cad-equipment-placement__input cad-board-wf-input"
+                    style={{ width: `${boardRenameInputWidth}px`, ...(equipmentLabelOffsets[board.id] ? { left: equipmentLabelOffsets[board.id].left, top: equipmentLabelOffsets[board.id].top, transform: 'none' } : {}) }}
+                    value={boardRenameDraft}
+                    onChange={(event) => setBoardRenameDraft(event.currentTarget.value)}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') onBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
+                      else if (event.key === 'Escape') onBoardLabelRenameCommit?.(board.id, board.label)
+                      event.stopPropagation()
+                    }}
+                    onBlur={(event) => {
+                      if (Date.now() - boardRenameOpenedAtRef.current < 120) return
+                      onBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
+                    }}
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                ) : (
+                  <span
+                    className="cad-board-placement__label cad-board-wf-label"
+                    style={equipmentLabelOffsets[board.id] ? { left: equipmentLabelOffsets[board.id].left, top: equipmentLabelOffsets[board.id].top, maxWidth: equipmentLabelOffsets[board.id].maxWidth, transform: 'none' } : {}}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation()
+                      onBoardLabelDoubleClick?.(board.id)
+                    }}
+                  >
+                    {board.label}
+                  </span>
+                )
+              )}
+
+              <button
+                type="button"
+                className={`cad-board-trigger cad-board-trigger--${triggerSide}${isDropdownOpen ? ' is-active' : ''}`}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setActiveDropdownBoardId(isDropdownOpen ? null : board.id)
+                }}
+                title={isDropdownOpen ? 'Fechar lista' : 'Ver dispositivos'}
+              >
+                {triggerSide === 'right' ? '›' : '‹'}
+              </button>
+
+              {isDropdownOpen && (
+                <div
+                  className={`cad-board-dropdown cad-board-dropdown--${triggerSide}`}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  {filledSlots.length === 0 ? (
+                    <div className="cad-board-dropdown__empty">Nenhum dispositivo instalado</div>
+                  ) : (
+                    filledSlots.map(({ slot, index }) => (
+                      <div key={index} className="cad-board-dropdown__item">
+                        <img src={slot.iconSrc} alt="" className="cad-board-dropdown__item-icon" draggable={false} />
+                        <span className="cad-board-dropdown__item-label">{slot.label}</span>
+                        <button
+                          type="button"
+                          className="cad-board-dropdown__item-remove"
+                          title="Remover"
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onBoardSlotRemove?.({ boardId: board.id, slotIndex: index })
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        }
+
+        // ── Slot-grid board (Quadro Custom) ──────────────────────────────
         const isDynamic = board.slotCount === null
         const cols = isDynamic
           ? Math.min(board.slots.length, board.columnCount ?? 12)
@@ -3716,6 +4620,7 @@ function CadCanvas({
         return (
           <div
             key={board.id}
+            data-board-id={board.id}
             className={`cad-board-placement${selectedBoardId === board.id ? ' is-selected' : ''}`}
             style={{ left: stagePoint.x, top: stagePoint.y }}
             onMouseDown={(event) => handleBoardMouseDown(event, board)}
@@ -3735,7 +4640,7 @@ function CadCanvas({
               <input
                 ref={boardRenameInputRef}
                 className="cad-equipment-placement__input"
-                style={{ width: `${boardRenameInputWidth}px` }}
+                style={{ width: `${boardRenameInputWidth}px`, ...(equipmentLabelOffsets[board.id] ? { left: equipmentLabelOffsets[board.id].left, top: equipmentLabelOffsets[board.id].top, transform: 'none' } : {}) }}
                 value={boardRenameDraft}
                 onChange={(event) => setBoardRenameDraft(event.currentTarget.value)}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -3757,6 +4662,7 @@ function CadCanvas({
             ) : (
               <span
                 className="cad-board-placement__label"
+                style={equipmentLabelOffsets[board.id] ? { left: equipmentLabelOffsets[board.id].left, top: equipmentLabelOffsets[board.id].top, maxWidth: equipmentLabelOffsets[board.id].maxWidth, transform: 'none' } : {}}
                 onDoubleClick={(event) => {
                   event.stopPropagation()
                   onBoardLabelDoubleClick?.(board.id)
@@ -3839,149 +4745,467 @@ function CadCanvas({
         )
       })}
 
-      {(avOrganizers ?? []).map((org) => {
-        if (!isEquipmentIconVisible(org, equipmentFilters)) return null
-        const visiblePoint = (() => {
-          if (draggingAvOrganizer?.id === org.id) return draggingAvOrganizer.point
-          const _orgPolyDrag = getPolygonDragData(org.polygonId)
-          if (_orgPolyDrag) {
-            const initial = _orgPolyDrag.initialAvOrganizerPoints?.find((o) => o.id === org.id)
-            if (initial) {
-              return stageToNorm(
-                {
-                  x: normToStage(initial.point, fittedBackgroundImage).x + _orgPolyDrag.stageDelta.x,
-                  y: normToStage(initial.point, fittedBackgroundImage).y + _orgPolyDrag.stageDelta.y,
-                },
-                fittedBackgroundImage,
-              )
-            }
-          }
-          return org.point
+      {fittedBackgroundImage ? (avOrganizers ?? []).filter((org) => isEquipmentIconVisible(org, equipmentFilters)).map((org) => {
+        const orgPolyDrag = getPolygonDragData(org.polygonId)
+        const visibleRectStart = (() => {
+          if (!orgPolyDrag) return org.rectStart
+          const initial = orgPolyDrag.initialAvOrganizerRects?.find((o) => o.id === org.id)
+          if (!initial) return org.rectStart
+          return stageToNorm({
+            x: normToStage(initial.rectStart, fittedBackgroundImage).x + orgPolyDrag.stageDelta.x,
+            y: normToStage(initial.rectStart, fittedBackgroundImage).y + orgPolyDrag.stageDelta.y,
+          }, fittedBackgroundImage)
         })()
-        const stagePoint = normToStage(visiblePoint, fittedBackgroundImage)
+        const visibleRectEnd = (() => {
+          if (!orgPolyDrag) return org.rectEnd
+          const initial = orgPolyDrag.initialAvOrganizerRects?.find((o) => o.id === org.id)
+          if (!initial) return org.rectEnd
+          return stageToNorm({
+            x: normToStage(initial.rectEnd, fittedBackgroundImage).x + orgPolyDrag.stageDelta.x,
+            y: normToStage(initial.rectEnd, fittedBackgroundImage).y + orgPolyDrag.stageDelta.y,
+          }, fittedBackgroundImage)
+        })()
+
+        const isResizingThis = resizingAvOrganizer?.id === org.id
+        const isDraggingThis = draggingAvOrganizer?.id === org.id
+        let displayRectStart, displayRectEnd
+        if (isDraggingThis && draggingAvOrganizer.currentStart) {
+          displayRectStart = draggingAvOrganizer.currentStart
+          displayRectEnd   = draggingAvOrganizer.currentEnd
+        } else if (isResizingThis && resizingAvOrganizer.currentRectStart) {
+          displayRectStart = resizingAvOrganizer.currentRectStart
+          displayRectEnd   = resizingAvOrganizer.currentRectEnd
+        } else {
+          displayRectStart = visibleRectStart
+          displayRectEnd   = visibleRectEnd
+        }
+
+        const ss = normToStage(displayRectStart, fittedBackgroundImage)
+        const se = normToStage(displayRectEnd,   fittedBackgroundImage)
+        const left   = Math.min(ss.x, se.x)
+        const top    = Math.min(ss.y, se.y)
+        const width  = Math.abs(se.x - ss.x)
+        const height = Math.abs(se.y - ss.y)
+
+        const isDropdownOpen = activeDropdownAvOrganizerId === org.id
+        const filledSlots = org.slots
+          .map((slot, index) => ({ slot, index }))
+          .filter(({ slot }) => slot !== null)
+
+        const orgPolygon = polygons.find((p) => p.id === org.polygonId)
+        let triggerSide = 'right'
+        if (orgPolygon) {
+          const rightCheckNorm = stageToNorm(
+            { x: se.x + 28, y: (ss.y + se.y) / 2 },
+            fittedBackgroundImage,
+          )
+          if (!isPointInsidePolygon(rightCheckNorm, orgPolygon.points)) triggerSide = 'left'
+        }
+
         return (
           <div
             key={org.id}
-            className={`cad-av-organizer-placement${selectedAvOrganizerId === org.id ? ' is-selected' : ''}`}
-            style={{ left: stagePoint.x, top: stagePoint.y }}
+            data-av-org-id={org.id}
+            className={`cad-av-organizer-rect${selectedAvOrganizerId === org.id ? ' is-selected' : ''}${dragOverAvOrganizer?.id === org.id && dragOverAvOrganizer?.isValid ? ' is-drop-target' : ''}${dragOverAvOrganizer?.id === org.id && dragOverAvOrganizer?.isValid === false ? ' is-invalid-target' : ''}`}
+            style={{ left, top, width, height }}
             onMouseDown={(event) => handleAvOrganizerMouseDown(event, org)}
             onContextMenu={(event) => openAvOrganizerContextMenu(event, org.id)}
+            onDragOver={(event) => {
+              event.stopPropagation()
+              if (event.dataTransfer.types.includes('application/x-av-org-only-item')) {
+                event.preventDefault()
+                const isFull = org.slots.filter(Boolean).length >= 99
+                if (isFull) {
+                  event.dataTransfer.dropEffect = 'none'
+                  setDragOverAvOrganizer({ id: org.id, isValid: false })
+                } else {
+                  event.dataTransfer.dropEffect = 'copy'
+                  setDragOverAvOrganizer({ id: org.id, isValid: true })
+                  if (activeDropdownAvOrganizerId !== org.id) setActiveDropdownAvOrganizerId(org.id)
+                }
+              } else if (event.dataTransfer.types.includes('application/x-equipment-item')) {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'none'
+                setDragOverAvOrganizer({ id: org.id, isValid: false })
+              }
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setDragOverAvOrganizer(null)
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setDragOverAvOrganizer(null)
+              try {
+                const itemData = JSON.parse(event.dataTransfer.getData('application/x-equipment-item'))
+                const catalogItemId = itemData?.catalogItemId ?? itemData?.id
+                if (!itemData?.label || !isAvOrganizerOnlyItem(catalogItemId)) return
+                const slotIndex = org.slots.findIndex((s) => s === null)
+                const insertIndex = slotIndex === -1 ? org.slots.length : slotIndex
+                if (insertIndex >= 99) return
+                onAvOrganizerSlotInstall?.({
+                  organizerId: org.id,
+                  slotIndex: insertIndex,
+                  device: {
+                    id: `av-slot-${org.id}-${insertIndex}-${Date.now()}`,
+                    catalogItemId,
+                    label: itemData.label,
+                    iconSrc: itemData.iconSrc,
+                    iconKey: itemData.iconKey,
+                  },
+                })
+              } catch {}
+            }}
           >
+            <div className="cad-av-organizer-rect__center" style={{ left: width / 2, top: height / 2 }} />
+            {equipmentFilters?.text !== false && equipLabelStage !== 'hidden' && equipmentLabelOffsets[org.id] && (
+              <div
+                className="cad-rect-outside-label"
+                style={{ left: equipmentLabelOffsets[org.id].left - 17, top: equipmentLabelOffsets[org.id].top, pointerEvents: 'none' }}
+              >
+                <img src={org.iconSrc} alt="" className="cad-rect-outside-label__icon" draggable={false} />
+                {renamingAvOrganizerId === org.id ? (
+                  <input
+                    ref={avOrganizerRenameInputRef}
+                    className="cad-rect-outside-label__input"
+                    style={{ width: `${avOrganizerRenameInputWidth}px`, borderColor: '#2980b9' }}
+                    value={avOrganizerRenameDraft}
+                    onChange={(event) => setAvOrganizerRenameDraft(event.currentTarget.value)}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
+                      else if (event.key === 'Escape') onAvOrganizerLabelRenameCommit?.(org.id, org.label)
+                      event.stopPropagation()
+                    }}
+                    onBlur={(event) => {
+                      if (Date.now() - avOrganizerRenameOpenedAtRef.current < 120) return
+                      onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
+                    }}
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                ) : (
+                  <span
+                    className="cad-rect-outside-label__text"
+                    style={{ maxWidth: equipmentLabelOffsets[org.id].maxWidth, pointerEvents: 'auto' }}
+                    onDoubleClick={(event) => { event.stopPropagation(); onAvOrganizerLabelDoubleClick?.(org.id) }}
+                  >
+                    {org.label}
+                  </span>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
-              className={`cad-board-pin${org.pinned ? ' is-pinned' : ''}`}
-              title={org.pinned ? 'Desafixar' : 'Fixar'}
+              className={`cad-board-trigger cad-board-trigger--${triggerSide}${isDropdownOpen ? ' is-active' : ''}`}
               onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => { event.stopPropagation(); onAvOrganizerPinToggle?.(org.id) }}
+              onClick={(event) => {
+                event.stopPropagation()
+                setActiveDropdownAvOrganizerId(isDropdownOpen ? null : org.id)
+              }}
+              title={isDropdownOpen ? 'Fechar lista' : 'Ver drivers'}
             >
-              <img src={org.pinned ? pinSelecionado : pinPadrao} alt="" draggable={false} />
+              {triggerSide === 'right' ? '›' : '‹'}
             </button>
-            <img src={org.iconSrc} alt="" className="cad-av-organizer-placement__icon" draggable={false} />
-            {equipmentFilters?.text === false || equipLabelStage === 'hidden' ? null : renamingAvOrganizerId === org.id ? (
-              <input
-                ref={avOrganizerRenameInputRef}
-                className="cad-equipment-placement__input"
-                style={{ width: '90px' }}
-                value={avOrganizerRenameDraft}
-                onChange={(event) => setAvOrganizerRenameDraft(event.currentTarget.value)}
+
+            {isDropdownOpen && (
+              <div
+                className={`cad-board-dropdown cad-board-dropdown--${triggerSide}`}
                 onMouseDown={(event) => event.stopPropagation()}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
-                  } else if (event.key === 'Escape') {
-                    onAvOrganizerLabelRenameCommit?.(org.id, org.label)
-                  }
-                  event.stopPropagation()
-                }}
-                onBlur={(event) => {
-                  if (Date.now() - avOrganizerRenameOpenedAtRef.current < 120) return
-                  onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
-                }}
-                // eslint-disable-next-line jsx-a11y/no-autofocus
-                autoFocus
-              />
-            ) : (
-              <span
-                className="cad-av-organizer-placement__label"
-                onDoubleClick={(event) => {
-                  event.stopPropagation()
-                  onAvOrganizerLabelDoubleClick?.(org.id)
-                }}
               >
-                {org.label}
-              </span>
+                {filledSlots.length === 0 ? (
+                  <div className="cad-board-dropdown__empty">Nenhum driver instalado</div>
+                ) : (
+                  filledSlots.map(({ slot, index }) => (
+                    <div key={index} className="cad-board-dropdown__item">
+                      <img src={slot.iconSrc} alt="" className="cad-board-dropdown__item-icon" draggable={false} />
+                      <span className="cad-board-dropdown__item-label">{slot.label}</span>
+                      <button
+                        type="button"
+                        className="cad-board-dropdown__item-remove"
+                        title="Remover"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onAvOrganizerSlotRemove?.({ organizerId: org.id, slotIndex: index })
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             )}
-            <div
-              className={`cad-av-organizer-structure${org.pinned ? ' is-pinned' : ''}`}
-              style={{ gridTemplateColumns: `repeat(${Math.min(org.slots.length, org.columnCount ?? 3)}, 24px)` }}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              {org.slots.map((slot, slotIndex) => {
-                const isOver = dragOverAvOrganizerSlot?.organizerId === org.id && dragOverAvOrganizerSlot?.slotIndex === slotIndex
-                return (
+
+            {isResizingThis && (
+              <>
+                {['tl', 'tr', 'bl', 'br'].map((corner) => (
                   <div
-                    key={slotIndex}
-                    className={`cad-av-organizer-slot${slot ? ' is-occupied' : ''}${isOver ? ' is-drag-over' : ''}`}
-                    title={slot ? slot.label : `Slot ${slotIndex + 1}`}
-                    onDragOver={(event) => {
-                      if (slot) return
-                      event.preventDefault()
-                      event.dataTransfer.dropEffect = 'copy'
-                      setDragOverAvOrganizerSlot({ organizerId: org.id, slotIndex })
+                    key={corner}
+                    className="cad-curtain-resize-handle"
+                    style={{
+                      left: corner === 'tl' || corner === 'bl' ? -5 : width - 5,
+                      top:  corner === 'tl' || corner === 'tr' ? -5 : height - 5,
                     }}
-                    onDragLeave={() => setDragOverAvOrganizerSlot(null)}
-                    onDrop={(event) => {
-                      event.preventDefault()
+                    onPointerDown={(event) => {
                       event.stopPropagation()
-                      setDragOverAvOrganizerSlot(null)
-                      if (slot) return
-                      try {
-                        const itemData = JSON.parse(event.dataTransfer.getData('application/x-equipment-item'))
-                        const catalogItemId = itemData?.catalogItemId ?? itemData?.id
-                        if (!itemData?.label || !isAvOrganizerOnlyItem(catalogItemId)) return
-                        onAvOrganizerSlotInstall?.({
-                          organizerId: org.id,
-                          slotIndex,
-                          device: {
-                            id: `av-slot-${org.id}-${slotIndex}-${Date.now()}`,
-                            catalogItemId,
-                            label: itemData.label,
-                            iconSrc: itemData.iconSrc,
-                            iconKey: itemData.iconKey,
-                          },
-                        })
-                      } catch {}
-                    }}
-                    onContextMenu={(event) => {
-                      if (!slot) return
-                      event.preventDefault()
-                      event.stopPropagation()
-                      const container = containerRef.current
-                      const bounds = container?.getBoundingClientRect()
-                      const menuWidth = 172
-                      const menuHeight = 36
-                      const rawX = event.clientX - (bounds?.left ?? 0)
-                      const rawY = event.clientY - (bounds?.top ?? 0)
-                      setAvOrganizerSlotContextMenu({
-                        organizerId: org.id,
-                        slotIndex,
-                        x: Math.max(4, Math.min(rawX, (bounds?.width ?? 400) - menuWidth - 4)),
-                        y: Math.max(4, Math.min(rawY, (bounds?.height ?? 400) - menuHeight - 4)),
+                      event.currentTarget.setPointerCapture(event.pointerId)
+                      setResizingAvOrganizer({
+                        id: org.id,
+                        corner,
+                        initialRectStart: org.rectStart,
+                        initialRectEnd:   org.rectEnd,
+                        polygonPoints: polygons.find((p) => p.id === org.polygonId)?.points ?? [],
+                        startPointerStage: {
+                          x: event.clientX - containerRef.current.getBoundingClientRect().left,
+                          y: event.clientY - containerRef.current.getBoundingClientRect().top,
+                        },
+                        currentRectStart: null,
+                        currentRectEnd:   null,
                       })
                     }}
-                  >
-                    {slot ? (
-                      <img src={slot.iconSrc} alt={slot.label} className="cad-av-organizer-slot__icon" draggable={false} />
-                    ) : (
-                      <span className="cad-av-organizer-slot__number">+</span>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+                  />
+                ))}
+              </>
+            )}
           </div>
         )
-      })}
+      }) : null}
+
+      {fittedBackgroundImage ? (customBoards ?? []).filter((board) => isEquipmentIconVisible(board, equipmentFilters)).map((board) => {
+        const cbPolyDrag = getPolygonDragData(board.polygonId)
+        const visibleRectStart = (() => {
+          if (!cbPolyDrag) return board.rectStart
+          const initial = cbPolyDrag.initialCustomBoardRects?.find((b) => b.id === board.id)
+          if (!initial) return board.rectStart
+          return stageToNorm({
+            x: normToStage(initial.rectStart, fittedBackgroundImage).x + cbPolyDrag.stageDelta.x,
+            y: normToStage(initial.rectStart, fittedBackgroundImage).y + cbPolyDrag.stageDelta.y,
+          }, fittedBackgroundImage)
+        })()
+        const visibleRectEnd = (() => {
+          if (!cbPolyDrag) return board.rectEnd
+          const initial = cbPolyDrag.initialCustomBoardRects?.find((b) => b.id === board.id)
+          if (!initial) return board.rectEnd
+          return stageToNorm({
+            x: normToStage(initial.rectEnd, fittedBackgroundImage).x + cbPolyDrag.stageDelta.x,
+            y: normToStage(initial.rectEnd, fittedBackgroundImage).y + cbPolyDrag.stageDelta.y,
+          }, fittedBackgroundImage)
+        })()
+
+        const isResizingThis = resizingCustomBoard?.id === board.id
+        const isDraggingThis = draggingCustomBoard?.id === board.id
+        let displayRectStart, displayRectEnd
+        if (isDraggingThis && draggingCustomBoard.currentStart) {
+          displayRectStart = draggingCustomBoard.currentStart
+          displayRectEnd   = draggingCustomBoard.currentEnd
+        } else if (isResizingThis && resizingCustomBoard.currentRectStart) {
+          displayRectStart = resizingCustomBoard.currentRectStart
+          displayRectEnd   = resizingCustomBoard.currentRectEnd
+        } else {
+          displayRectStart = visibleRectStart
+          displayRectEnd   = visibleRectEnd
+        }
+
+        const ss = normToStage(displayRectStart, fittedBackgroundImage)
+        const se = normToStage(displayRectEnd,   fittedBackgroundImage)
+        const left   = Math.min(ss.x, se.x)
+        const top    = Math.min(ss.y, se.y)
+        const width  = Math.abs(se.x - ss.x)
+        const height = Math.abs(se.y - ss.y)
+
+        const isDropdownOpen = activeDropdownCustomBoardId === board.id
+        const filledSlots = board.slots
+          .map((slot, index) => ({ slot, index }))
+          .filter(({ slot }) => slot !== null)
+
+        const cbPolygon = polygons.find((p) => p.id === board.polygonId)
+        let triggerSide = 'right'
+        if (cbPolygon) {
+          const rightCheckNorm = stageToNorm(
+            { x: se.x + 28, y: (ss.y + se.y) / 2 },
+            fittedBackgroundImage,
+          )
+          if (!isPointInsidePolygon(rightCheckNorm, cbPolygon.points)) triggerSide = 'left'
+        }
+
+        return (
+          <div
+            key={board.id}
+            data-custom-board-id={board.id}
+            className={`cad-custom-board-rect${selectedCustomBoardId === board.id ? ' is-selected' : ''}${dragOverCustomBoard?.id === board.id && dragOverCustomBoard?.isValid ? ' is-drop-target' : ''}${dragOverCustomBoard?.id === board.id && dragOverCustomBoard?.isValid === false ? ' is-invalid-target' : ''}`}
+            style={{ left, top, width, height }}
+            onMouseDown={(event) => handleCustomBoardMouseDown(event, board)}
+            onContextMenu={(event) => openCustomBoardContextMenu(event, board.id)}
+            onDragOver={(event) => {
+              event.stopPropagation()
+              if (event.dataTransfer.types.includes('application/x-board-only-item')) {
+                event.preventDefault()
+                const isFull = board.slots.filter(Boolean).length >= 99
+                if (isFull) {
+                  event.dataTransfer.dropEffect = 'none'
+                  setDragOverCustomBoard({ id: board.id, isValid: false })
+                } else {
+                  event.dataTransfer.dropEffect = 'copy'
+                  setDragOverCustomBoard({ id: board.id, isValid: true })
+                  if (activeDropdownCustomBoardId !== board.id) setActiveDropdownCustomBoardId(board.id)
+                }
+              } else if (event.dataTransfer.types.includes('application/x-equipment-item')) {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'none'
+                setDragOverCustomBoard({ id: board.id, isValid: false })
+              }
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setDragOverCustomBoard(null)
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setDragOverCustomBoard(null)
+              try {
+                const itemData = JSON.parse(event.dataTransfer.getData('application/x-equipment-item'))
+                const catalogItemId = itemData?.catalogItemId ?? itemData?.id
+                if (!itemData?.label || !isBoardOnlyItem(catalogItemId)) return
+                const slotIndex = board.slots.findIndex((s) => s === null)
+                const insertIndex = slotIndex === -1 ? board.slots.length : slotIndex
+                if (insertIndex >= 99) return
+                onCustomBoardSlotInstall?.({
+                  boardId: board.id,
+                  slotIndex: insertIndex,
+                  device: {
+                    id: `cb-slot-${board.id}-${insertIndex}-${Date.now()}`,
+                    catalogItemId,
+                    label: itemData.label,
+                    iconSrc: itemData.iconSrc,
+                    iconKey: itemData.iconKey,
+                  },
+                })
+              } catch {}
+            }}
+          >
+            <div className="cad-custom-board-rect__center" style={{ left: width / 2, top: height / 2 }} />
+            {equipmentFilters?.text !== false && equipLabelStage !== 'hidden' && equipmentLabelOffsets[board.id] && (
+              <div
+                className="cad-rect-outside-label"
+                style={{ left: equipmentLabelOffsets[board.id].left - 17, top: equipmentLabelOffsets[board.id].top, pointerEvents: 'none' }}
+              >
+                <img src={board.iconSrc} alt="" className="cad-rect-outside-label__icon" draggable={false} />
+                {renamingCustomBoardId === board.id ? (
+                  <input
+                    ref={customBoardRenameInputRef}
+                    className="cad-rect-outside-label__input"
+                    style={{ width: `${customBoardRenameInputWidth}px`, borderColor: '#e67e22' }}
+                    value={customBoardRenameDraft}
+                    onChange={(event) => setCustomBoardRenameDraft(event.currentTarget.value)}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') onCustomBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
+                      else if (event.key === 'Escape') onCustomBoardLabelRenameCommit?.(board.id, board.label)
+                      event.stopPropagation()
+                    }}
+                    onBlur={(event) => {
+                      if (Date.now() - customBoardRenameOpenedAtRef.current < 120) return
+                      onCustomBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
+                    }}
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                ) : (
+                  <span
+                    className="cad-rect-outside-label__text"
+                    style={{ maxWidth: equipmentLabelOffsets[board.id].maxWidth, pointerEvents: 'auto' }}
+                    onDoubleClick={(event) => { event.stopPropagation(); onCustomBoardLabelDoubleClick?.(board.id) }}
+                  >
+                    {board.label}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className={`cad-board-trigger cad-board-trigger--${triggerSide}${isDropdownOpen ? ' is-active' : ''}`}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                setActiveDropdownCustomBoardId(isDropdownOpen ? null : board.id)
+              }}
+              title={isDropdownOpen ? 'Fechar lista' : 'Ver módulos'}
+            >
+              {triggerSide === 'right' ? '›' : '‹'}
+            </button>
+
+            {isDropdownOpen && (
+              <div
+                className={`cad-board-dropdown cad-board-dropdown--${triggerSide}`}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                {filledSlots.length === 0 ? (
+                  <div className="cad-board-dropdown__empty">Nenhum módulo instalado</div>
+                ) : (
+                  filledSlots.map(({ slot, index }) => (
+                    <div key={index} className="cad-board-dropdown__item">
+                      <img src={slot.iconSrc} alt="" className="cad-board-dropdown__item-icon" draggable={false} />
+                      <span className="cad-board-dropdown__item-label">{slot.label}</span>
+                      <button
+                        type="button"
+                        className="cad-board-dropdown__item-remove"
+                        title="Remover"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onCustomBoardSlotRemove?.({ boardId: board.id, slotIndex: index })
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {isResizingThis && (
+              <>
+                {['tl', 'tr', 'bl', 'br'].map((corner) => (
+                  <div
+                    key={corner}
+                    className="cad-curtain-resize-handle"
+                    style={{
+                      left: corner === 'tl' || corner === 'bl' ? -5 : width - 5,
+                      top:  corner === 'tl' || corner === 'tr' ? -5 : height - 5,
+                    }}
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      event.currentTarget.setPointerCapture(event.pointerId)
+                      setResizingCustomBoard({
+                        id: board.id,
+                        corner,
+                        initialRectStart: board.rectStart,
+                        initialRectEnd:   board.rectEnd,
+                        polygonPoints: polygons.find((p) => p.id === board.polygonId)?.points ?? [],
+                        startPointerStage: {
+                          x: event.clientX - containerRef.current.getBoundingClientRect().left,
+                          y: event.clientY - containerRef.current.getBoundingClientRect().top,
+                        },
+                        currentRectStart: null,
+                        currentRectEnd:   null,
+                      })
+                    }}
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        )
+      }) : null}
 
       {fittedBackgroundImage ? (placedCurtains ?? []).filter((c) => isEquipmentIconVisible(c, equipmentFilters)).map((curtain) => {
         const isDragging = draggingCurtain?.id === curtain.id
@@ -4051,12 +5275,14 @@ function CadCanvas({
                 x: event.clientX - rect.left - ss.x,
                 y: event.clientY - rect.top  - ss.y,
               }
+              const curtainDragPolygon = polygons.find((p) => p.id === curtain.polygonId)
               curtainHoldTimerRef.current = window.setTimeout(() => {
                 curtainHoldTimerRef.current = null
                 setDraggingCurtain({
                   id: curtain.id,
                   initialRectStart: curtain.rectStart,
                   initialRectEnd: curtain.rectEnd,
+                  polygonPoints: curtainDragPolygon?.points ?? [],
                   dragOffset,
                   currentStart: null,
                   currentEnd: null,
@@ -4065,14 +5291,18 @@ function CadCanvas({
             }}
             onContextMenu={(event) => openCurtainContextMenu(event, curtain.id)}
           >
-            <div className="cad-curtain-icon-center" style={{ left: dw / 2, top: dh / 2 }}>
-              <img src={curtain.iconSrc} alt="" className="cad-equipment-placement__icon" draggable={false} />
-              {equipmentFilters?.text !== false && equipLabelStage !== 'hidden' ? (
-                renamingCurtainId === curtain.id ? (
+            <div className="cad-curtain-icon-center" style={{ left: dw / 2, top: dh / 2 }} />
+            {equipmentFilters?.text !== false && equipLabelStage !== 'hidden' && equipmentLabelOffsets[curtain.id] && (
+              <div
+                className="cad-rect-outside-label"
+                style={{ left: equipmentLabelOffsets[curtain.id].left - 17, top: equipmentLabelOffsets[curtain.id].top, pointerEvents: 'none' }}
+              >
+                <img src={curtain.iconSrc} alt="" className="cad-rect-outside-label__icon" draggable={false} />
+                {renamingCurtainId === curtain.id ? (
                   <input
                     ref={curtainRenameInputRef}
-                    className="cad-equipment-placement__input"
-                    style={{ width: `${curtainRenameInputWidth}px`, pointerEvents: 'auto' }}
+                    className="cad-rect-outside-label__input"
+                    style={{ width: `${curtainRenameInputWidth}px` }}
                     value={curtainRenameDraft}
                     onChange={(event) => setCurtainRenameDraft(event.currentTarget.value)}
                     onMouseDown={(event) => event.stopPropagation()}
@@ -4093,8 +5323,8 @@ function CadCanvas({
                   />
                 ) : (
                   <span
-                    className="cad-equipment-placement__label"
-                    style={{ pointerEvents: 'auto' }}
+                    className="cad-rect-outside-label__text"
+                    style={{ maxWidth: equipmentLabelOffsets[curtain.id].maxWidth, pointerEvents: 'auto' }}
                     onDoubleClick={(event) => {
                       event.stopPropagation()
                       onCurtainLabelDoubleClick?.(curtain.id)
@@ -4102,9 +5332,9 @@ function CadCanvas({
                   >
                     {curtain.label}
                   </span>
-                )
-              ) : null}
-            </div>
+                )}
+              </div>
+            )}
 
             {isResizing ? (
               <>
@@ -4124,6 +5354,7 @@ function CadCanvas({
                         corner,
                         initialRectStart: curtain.rectStart,
                         initialRectEnd:   curtain.rectEnd,
+                        polygonPoints: polygons.find((p) => p.id === curtain.polygonId)?.points ?? [],
                         startPointerStage: {
                           x: event.clientX - containerRef.current.getBoundingClientRect().left,
                           y: event.clientY - containerRef.current.getBoundingClientRect().top,
@@ -4191,6 +5422,14 @@ function CadCanvas({
 
       {pendingCurtainEquipment ? (
         <div className="cad-canvas-top-message">Desenhe um retângulo para definir as dimensões da cortina</div>
+      ) : null}
+
+      {pendingAvOrganizerEquipment ? (
+        <div className="cad-canvas-top-message">Desenhe um retângulo para definir as dimensões do Organizador AV</div>
+      ) : null}
+
+      {pendingCustomBoardEquipment ? (
+        <div className="cad-canvas-top-message">Desenhe um retângulo para definir as dimensões do quadro</div>
       ) : null}
 
       {polygons.map((polygon) => {
@@ -4440,25 +5679,6 @@ function CadCanvas({
         </div>
       ) : null}
 
-      {avOrganizerSlotContextMenu ? (
-        <div
-          className="cad-tree-context-menu"
-          style={{ left: `${avOrganizerSlotContextMenu.x}px`, top: `${avOrganizerSlotContextMenu.y}px` }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            className="cad-tree-context-menu__item"
-            onClick={() => {
-              onAvOrganizerSlotRemove?.({ organizerId: avOrganizerSlotContextMenu.organizerId, slotIndex: avOrganizerSlotContextMenu.slotIndex })
-              setAvOrganizerSlotContextMenu(null)
-            }}
-          >
-            <span className="cad-tree-context-menu__label">Remover dispositivo</span>
-          </button>
-        </div>
-      ) : null}
-
       {avOrganizerContextMenu ? (
         <div
           className="cad-tree-context-menu"
@@ -4479,11 +5699,20 @@ function CadCanvas({
             type="button"
             className="cad-tree-context-menu__item"
             onClick={() => {
-              onAvOrganizerEdit?.(avOrganizerContextMenu.organizerId)
+              setResizingAvOrganizer({
+                id: avOrganizerContextMenu.organizerId,
+                corner: null,
+                initialRectStart: null,
+                initialRectEnd: null,
+                startPointerStage: null,
+                currentRectStart: null,
+                currentRectEnd: null,
+              })
+              onAvOrganizerSelect?.(avOrganizerContextMenu.organizerId)
               setAvOrganizerContextMenu(null)
             }}
           >
-            <span className="cad-tree-context-menu__label">Propriedades</span>
+            <span className="cad-tree-context-menu__label">Editar tamanho</span>
           </button>
           <button
             type="button"
@@ -4491,6 +5720,55 @@ function CadCanvas({
             onClick={() => {
               onAvOrganizerDelete?.(avOrganizerContextMenu.organizerId)
               setAvOrganizerContextMenu(null)
+            }}
+          >
+            <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />
+            <span className="cad-tree-context-menu__label">Excluir</span>
+          </button>
+        </div>
+      ) : null}
+
+      {customBoardContextMenu ? (
+        <div
+          className="cad-tree-context-menu"
+          style={{ left: `${customBoardContextMenu.x}px`, top: `${customBoardContextMenu.y}px` }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              onCustomBoardRename?.(customBoardContextMenu.boardId)
+              setCustomBoardContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Renomear</span>
+          </button>
+          <button
+            type="button"
+            className="cad-tree-context-menu__item"
+            onClick={() => {
+              setResizingCustomBoard({
+                id: customBoardContextMenu.boardId,
+                corner: null,
+                initialRectStart: null,
+                initialRectEnd: null,
+                startPointerStage: null,
+                currentRectStart: null,
+                currentRectEnd: null,
+              })
+              onCustomBoardSelect?.(customBoardContextMenu.boardId)
+              setCustomBoardContextMenu(null)
+            }}
+          >
+            <span className="cad-tree-context-menu__label">Editar tamanho</span>
+          </button>
+          <button
+            type="button"
+            className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"
+            onClick={() => {
+              onCustomBoardDelete?.(customBoardContextMenu.boardId)
+              setCustomBoardContextMenu(null)
             }}
           >
             <img src={apagarProjeto} alt="" className="cad-tree-context-menu__icon" />

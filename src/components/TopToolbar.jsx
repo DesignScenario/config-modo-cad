@@ -66,7 +66,7 @@ function IconButton({ title, active = false, pressed = active, onClick, children
 }
 
 const MIN_ZOOM = 10
-const MAX_ZOOM = 1000
+const MAX_ZOOM = 3000
 const MIN_OPACITY = 0
 const MAX_OPACITY = 100
 

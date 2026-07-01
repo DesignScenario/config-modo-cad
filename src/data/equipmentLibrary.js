@@ -16,6 +16,7 @@ export const equipmentLibraryTabs = {
       icon: 'pasta',
       children: [
         { id: 'amb-acessorios-1', label: 'AC-MOV-TETO', icon: 'sensor' },
+        { id: 'amb-acessorios-2', label: 'AC-TMD', icon: 'pulsadores' },
       ],
     },
     {
@@ -501,7 +502,9 @@ export function getEquipmentFilterKeys(itemId) {
   return equipmentLibraryFilterMap[itemId]?.filterKeys ?? []
 }
 
-export const BOARD_CATALOG_IDS = new Set(['sce-quadros-1', 'sce-quadros-2', 'sce-quadros-3'])
+export const BOARD_CATALOG_IDS = new Set(['sce-quadros-1', 'sce-quadros-2'])
+
+export const CUSTOM_BOARD_CATALOG_IDS = new Set(['sce-quadros-3'])
 
 export const AV_ORGANIZER_CATALOG_IDS = new Set(['drv-av-organizer'])
 
@@ -529,6 +532,7 @@ export const WALL_SNAP_CATALOG_IDS = new Set([
   'sce-keypads-prestige-1', 'sce-keypads-prestige-2', 'sce-keypads-prestige-3',
   'sce-keypads-prestige-4', 'sce-keypads-prestige-5', 'sce-keypads-prestige-6',
   'sce-keypads-prestige-7', 'sce-keypads-prestige-8',
+  'amb-acessorios-2',
 ])
 
 export const PIR_SENSOR_CATALOG_IDS = new Set([

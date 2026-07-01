@@ -13,18 +13,17 @@ import DeleteEnvironmentConfirmOverlay from './components/DeleteEnvironmentConfi
 import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
 import EquipmentPropertiesOverlay from './components/EquipmentPropertiesOverlay.jsx'
 import AutomationBoardOverlay from './components/AutomationBoardOverlay.jsx'
-import AvOrganizerOverlay from './components/AvOrganizerOverlay.jsx'
 import OcSensitivityOverlay from './components/OcSensitivityOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
-import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, isBoardOnlyItem, getBoardSlotCount, AV_ORGANIZER_CATALOG_IDS, isAvOrganizerOnlyItem, LIGHTING_CATALOG_IDS, OC_SENSOR_CATALOG_IDS, CURTAIN_CATALOG_IDS } from './data/equipmentLibrary.js'
+import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, CUSTOM_BOARD_CATALOG_IDS, isBoardOnlyItem, getBoardSlotCount, AV_ORGANIZER_CATALOG_IDS, isAvOrganizerOnlyItem, LIGHTING_CATALOG_IDS, OC_SENSOR_CATALOG_IDS, CURTAIN_CATALOG_IDS } from './data/equipmentLibrary.js'
 import { initialProject } from './data/initialProject.js'
 import './styles/cad.css'
 
 const AUTOMATION_ROOM_ID = 'sala-de-automacao'
 const PROJECT_ROOT_ID = 'novo-projeto'
 const MIN_ZOOM = 10
-const MAX_ZOOM = 1000
+const MAX_ZOOM = 3000
 const MIN_OPACITY = 0
 const MAX_OPACITY = 100
 const ENVIRONMENT_CLASS_OPTIONS = [
@@ -229,19 +228,21 @@ function App() {
   const [showEquipmentLibrary, setShowEquipmentLibrary] = useState(false)
   const [multiAddPlacementRequest, setMultiAddPlacementRequest] = useState(null)
   const [automationBoards, setAutomationBoards] = useState([])
-  const [pendingBoardPlacement, setPendingBoardPlacement] = useState(null)
-  const [pendingAvOrganizerPlacement, setPendingAvOrganizerPlacement] = useState(null)
+  const [pendingAvOrganizerEquipment, setPendingAvOrganizerEquipment] = useState(null)
   const [pendingOcPlacement, setPendingOcPlacement] = useState(null)
   const [pendingCurtainEquipment, setPendingCurtainEquipment] = useState(null)
   const [placedCurtains, setPlacedCurtains] = useState([])
   const [selectedCurtainId, setSelectedCurtainId] = useState(null)
   const [renamingCurtainId, setRenamingCurtainId] = useState(null)
-  const [editingBoardId, setEditingBoardId] = useState(null)
-  const [editingAvOrganizerId, setEditingAvOrganizerId] = useState(null)
   const [avOrganizers, setAvOrganizers] = useState([])
   const [selectedAvOrganizerId, setSelectedAvOrganizerId] = useState(null)
   const [renamingAvOrganizerId, setRenamingAvOrganizerId] = useState(null)
   const [renamingAvOrganizerSource, setRenamingAvOrganizerSource] = useState(null)
+  const [customBoards, setCustomBoards] = useState([])
+  const [selectedCustomBoardId, setSelectedCustomBoardId] = useState(null)
+  const [renamingCustomBoardId, setRenamingCustomBoardId] = useState(null)
+  const [renamingCustomBoardSource, setRenamingCustomBoardSource] = useState(null)
+  const [pendingCustomBoardEquipment, setPendingCustomBoardEquipment] = useState(null)
   const [isAwaitingScaleLine, setIsAwaitingScaleLine] = useState(false)
   const [pendingScaleSegment, setPendingScaleSegment] = useState(null)
   const [scaleDefinition, setScaleDefinition] = useState(null)
@@ -294,6 +295,7 @@ function App() {
     placedCurtains,
     automationBoards,
     avOrganizers,
+    customBoards,
     scaleDefinition,
     polygonColorById,
     polygons,
@@ -306,6 +308,7 @@ function App() {
     setPlacedCurtains(s.placedCurtains)
     setAutomationBoards(s.automationBoards)
     setAvOrganizers(s.avOrganizers)
+    setCustomBoards(s.customBoards ?? [])
     setScaleDefinition(s.scaleDefinition)
     setPolygonColorById(s.polygonColorById)
     setPolygons(s.polygons ?? [])
@@ -518,8 +521,24 @@ function App() {
     const removedEquipmentIds = placedEquipments
       .filter((equipment) => equipment.polygonId === polygonId)
       .map((equipment) => equipment.id)
+    const removedBoardIds = automationBoards
+      .filter((b) => b.polygonId === polygonId)
+      .map((b) => b.id)
+    const removedAvOrgIds = avOrganizers
+      .filter((o) => o.polygonId === polygonId)
+      .map((o) => o.id)
+    const removedCustomBoardIds = customBoards
+      .filter((b) => b.polygonId === polygonId)
+      .map((b) => b.id)
+    const removedCurtainIds = placedCurtains
+      .filter((c) => c.polygonId === polygonId)
+      .map((c) => c.id)
     setEnvironments((curr) => curr.filter((e) => e.polygonId !== polygonId))
     setPlacedEquipments((curr) => curr.filter((equipment) => equipment.polygonId !== polygonId))
+    setAutomationBoards((curr) => curr.filter((b) => b.polygonId !== polygonId))
+    setAvOrganizers((curr) => curr.filter((o) => o.polygonId !== polygonId))
+    setCustomBoards((curr) => curr.filter((b) => b.polygonId !== polygonId))
+    setPlacedCurtains((curr) => curr.filter((c) => c.polygonId !== polygonId))
     setPolygonColorById((curr) => {
       const next = { ...curr }
       delete next[polygonId]
@@ -528,13 +547,16 @@ function App() {
     if (env) {
       setProjectTree((curr) => removeNodeById(curr, env.id))
     }
-    setAutomationBoards((curr) => curr.filter((b) => b.polygonId !== polygonId))
     setEditingEnvironmentId((currentEditingId) => (env?.id === currentEditingId ? null : currentEditingId))
     setShowEnvironmentOverlay((currentVisible) => (isDeletedEditingEnvironment ? false : currentVisible))
     setSelectedEnvironmentId((currentSelectedId) => (env?.id === currentSelectedId ? null : currentSelectedId))
     setSelectedEquipmentId((currentSelectedId) =>
       removedEquipmentIds.includes(currentSelectedId) ? null : currentSelectedId,
     )
+    setSelectedBoardId((curr) => (removedBoardIds.includes(curr) ? null : curr))
+    setSelectedAvOrganizerId((curr) => (removedAvOrgIds.includes(curr) ? null : curr))
+    setSelectedCustomBoardId((curr) => (removedCustomBoardIds.includes(curr) ? null : curr))
+    setSelectedCurtainId((curr) => (removedCurtainIds.includes(curr) ? null : curr))
   }
 
   const handleCreateBoard = ({ polygonId, point, equipment, slotCount, columnCount }) => {
@@ -633,14 +655,6 @@ function App() {
     setProjectTree((curr) => removeNodeById(curr, boardId))
   }
 
-  const handleBoardEditRequest = (boardId) => setEditingBoardId(boardId)
-
-  const handleBoardEditConfirm = (boardId, { columnCount }) => {
-    pushSnapshotMaybe()
-    setAutomationBoards((curr) => curr.map((b) => (b.id === boardId ? { ...b, columnCount } : b)))
-    setEditingBoardId(null)
-  }
-
   const handleBoardMoved = ({ boardId, point, polygonId }) => {
     const nextEnvironment = environments.find((e) => e.polygonId === polygonId)
     if (!nextEnvironment) return
@@ -681,8 +695,8 @@ function App() {
     setRenamingBoardSource(null)
   }
 
-  const handleCreateAvOrganizer = ({ polygonId, point, equipment, columnCount }) => {
-    const environment = environments.find((e) => e.polygonId === polygonId)
+  const handleCreateAvOrganizer = ({ polygonId, environmentId, equipment, rectStart, rectEnd }) => {
+    const environment = environments.find((e) => e.id === environmentId)
     if (!environment) return
     pushSnapshotMaybe()
     const id = `av-org-${Date.now()}-${Math.round(Math.random() * 1000)}`
@@ -690,18 +704,17 @@ function App() {
       id,
       catalogItemId: equipment.catalogItemId ?? equipment.id,
       polygonId,
-      point,
+      rectStart,
+      rectEnd,
       label: equipment.label,
       iconSrc: equipment.iconSrc,
       iconKey: equipment.iconKey ?? 'quadros',
       filterKeys: equipment.filterKeys ?? [],
-      environmentId: environment.id,
-      columnCount: columnCount ?? 3,
-      pinned: false,
+      environmentId,
       slots: [null],
     }])
     setProjectTree((curr) =>
-      appendEquipmentToEnvironment(curr, environment.id, {
+      appendEquipmentToEnvironment(curr, environmentId, {
         id,
         label: equipment.label,
         icon: equipment.iconKey ?? 'quadros',
@@ -713,23 +726,19 @@ function App() {
     )
   }
 
+  const handleAvOrganizerRectDrawn = ({ rectStart, rectEnd }) => {
+    const pending = pendingAvOrganizerEquipment
+    if (!pending) return
+    handleCreateAvOrganizer({ polygonId: pending.polygonId, environmentId: pending.environmentId, equipment: pending.equipment, rectStart, rectEnd })
+    setPendingAvOrganizerEquipment(null)
+  }
+
+  const handleAvOrganizerCancel = () => setPendingAvOrganizerEquipment(null)
+
   const handleDeleteAvOrganizer = (id) => {
     pushSnapshotMaybe()
     setAvOrganizers((curr) => curr.filter((o) => o.id !== id))
     setProjectTree((curr) => removeNodeById(curr, id))
-  }
-
-  const handleAvOrganizerEditRequest = (id) => setEditingAvOrganizerId(id)
-
-  const handleAvOrganizerEditConfirm = (id, { columnCount }) => {
-    pushSnapshotMaybe()
-    setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, columnCount } : o)))
-    setEditingAvOrganizerId(null)
-  }
-
-  const handleAvOrganizerPinToggle = (id) => {
-    pushSnapshotMaybe()
-    setAvOrganizers((curr) => curr.map((o) => (o.id === id ? { ...o, pinned: !o.pinned } : o)))
   }
 
   const handleAvOrganizerSlotInstall = ({ organizerId, slotIndex, device }) => {
@@ -774,23 +783,11 @@ function App() {
     if (deviceId) setProjectTree((curr) => removeNodeById(curr, deviceId))
   }
 
-  const handleAvOrganizerMoved = ({ organizerId, point, polygonId }) => {
-    const nextEnvironment = environments.find((e) => e.polygonId === polygonId)
-    if (!nextEnvironment) return
-    const organizer = avOrganizers.find((o) => o.id === organizerId)
-    if (!organizer) return
+  const handleAvOrganizerMoved = ({ organizerId, rectStart, rectEnd }) => {
     pushSnapshotMaybe()
-    const prevEnvironmentId = organizer.environmentId
     setAvOrganizers((curr) =>
-      curr.map((o) => (o.id === organizerId ? { ...o, point, polygonId, environmentId: nextEnvironment.id } : o)),
+      curr.map((o) => (o.id === organizerId ? { ...o, rectStart, rectEnd } : o)),
     )
-    if (prevEnvironmentId !== nextEnvironment.id) {
-      setProjectTree((curr) => {
-        const orgNode = findNodeById(curr, organizerId)
-        if (!orgNode) return curr
-        return appendEquipmentToEnvironment(removeNodeById(curr, organizerId), nextEnvironment.id, orgNode)
-      })
-    }
   }
 
   const handleAvOrganizerRenameRequest = (id) => {
@@ -818,6 +815,131 @@ function App() {
     setSelectedAvOrganizerId(id)
     setSelectedEquipmentId(null)
     setSelectedBoardId(null)
+    setSelectedCustomBoardId(null)
+  }
+
+  const handleCreateCustomBoard = ({ polygonId, environmentId, equipment, rectStart, rectEnd }) => {
+    const environment = environments.find((e) => e.id === environmentId)
+    if (!environment) return
+    pushSnapshotMaybe()
+    const id = `custom-board-${Date.now()}-${Math.round(Math.random() * 1000)}`
+    setCustomBoards((curr) => [...curr, {
+      id,
+      catalogItemId: equipment.catalogItemId ?? equipment.id,
+      polygonId,
+      rectStart,
+      rectEnd,
+      label: equipment.label,
+      iconSrc: equipment.iconSrc,
+      iconKey: equipment.iconKey ?? 'quadros',
+      filterKeys: equipment.filterKeys ?? [],
+      environmentId,
+      slots: [null],
+    }])
+    setProjectTree((curr) =>
+      appendEquipmentToEnvironment(curr, environmentId, {
+        id,
+        label: equipment.label,
+        icon: equipment.iconKey ?? 'quadros',
+        iconSrc: equipment.iconSrc,
+        source: 'automation-board',
+        children: [],
+        expanded: true,
+      }),
+    )
+  }
+
+  const handleCustomBoardRectDrawn = ({ rectStart, rectEnd }) => {
+    const pending = pendingCustomBoardEquipment
+    if (!pending) return
+    handleCreateCustomBoard({ polygonId: pending.polygonId, environmentId: pending.environmentId, equipment: pending.equipment, rectStart, rectEnd })
+    setPendingCustomBoardEquipment(null)
+  }
+
+  const handleCustomBoardCancel = () => setPendingCustomBoardEquipment(null)
+
+  const handleDeleteCustomBoard = (id) => {
+    pushSnapshotMaybe()
+    setCustomBoards((curr) => curr.filter((b) => b.id !== id))
+    setProjectTree((curr) => removeNodeById(curr, id))
+  }
+
+  const handleCustomBoardSlotInstall = ({ boardId, slotIndex, device }) => {
+    pushSnapshotMaybe()
+    setCustomBoards((curr) =>
+      curr.map((b) => {
+        if (b.id !== boardId) return b
+        const slots = [...b.slots]
+        slots[slotIndex] = device
+        const occupiedCount = slots.filter(Boolean).length
+        const hasEmpty = slots.some((s) => s === null)
+        if (!hasEmpty && occupiedCount < 99) slots.push(null)
+        return { ...b, slots }
+      }),
+    )
+    setProjectTree((curr) =>
+      appendEquipmentToEnvironment(curr, boardId, {
+        id: device.id,
+        label: device.label,
+        icon: device.iconKey ?? 'quadros',
+        iconSrc: device.iconSrc,
+        source: 'board-device',
+      }),
+    )
+  }
+
+  const handleCustomBoardSlotRemove = ({ boardId, slotIndex }) => {
+    pushSnapshotMaybe()
+    const board = customBoards.find((b) => b.id === boardId)
+    const deviceId = board?.slots[slotIndex]?.id ?? null
+    setCustomBoards((curr) =>
+      curr.map((b) => {
+        if (b.id !== boardId) return b
+        const slots = [...b.slots]
+        slots[slotIndex] = null
+        while (slots.length > 1 && slots[slots.length - 1] === null && slots[slots.length - 2] === null) {
+          slots.pop()
+        }
+        return { ...b, slots }
+      }),
+    )
+    if (deviceId) setProjectTree((curr) => removeNodeById(curr, deviceId))
+  }
+
+  const handleCustomBoardMoved = ({ boardId, rectStart, rectEnd }) => {
+    pushSnapshotMaybe()
+    setCustomBoards((curr) =>
+      curr.map((b) => (b.id === boardId ? { ...b, rectStart, rectEnd } : b)),
+    )
+  }
+
+  const handleCustomBoardRenameRequest = (id) => {
+    setRenamingCustomBoardId(id)
+    setRenamingCustomBoardSource('canvas')
+  }
+
+  const handleCustomBoardLabelDoubleClick = (id) => {
+    setRenamingCustomBoardId(id)
+    setRenamingCustomBoardSource('canvas')
+  }
+
+  const handleCommitCustomBoardLabelRename = (id, newName) => {
+    const trimmed = (newName ?? '').trim()
+    if (trimmed) {
+      pushSnapshotMaybe()
+      setCustomBoards((curr) => curr.map((b) => (b.id === id ? { ...b, label: trimmed } : b)))
+      setProjectTree((curr) => updateNodeLabel(curr, id, trimmed))
+    }
+    setRenamingCustomBoardId(null)
+    setRenamingCustomBoardSource(null)
+  }
+
+  const handleSelectCustomBoard = (id) => {
+    setSelectedCustomBoardId(id)
+    setSelectedEquipmentId(null)
+    setSelectedBoardId(null)
+    setSelectedAvOrganizerId(null)
+    setSelectedCurtainId(null)
   }
 
   const handleEquipmentDropped = ({ polygonId, point, equipment, wallNormal }) => {
@@ -833,18 +955,18 @@ function App() {
 
     if (AV_ORGANIZER_CATALOG_IDS.has(catalogItemId)) {
       const env = environments.find((e) => e.polygonId === polygonId)
-      if (env) setPendingAvOrganizerPlacement({ polygonId, point, equipment })
+      if (env) setPendingAvOrganizerEquipment({ polygonId, environmentId: env.id, equipment })
+      return
+    }
+
+    if (CUSTOM_BOARD_CATALOG_IDS.has(catalogItemId)) {
+      const env = environments.find((e) => e.polygonId === polygonId)
+      if (env) setPendingCustomBoardEquipment({ polygonId, environmentId: env.id, equipment })
       return
     }
 
     if (BOARD_CATALOG_IDS.has(catalogItemId)) {
-      const slotCount = getBoardSlotCount(catalogItemId)
-      if (slotCount === null) {
-        const env = environments.find((e) => e.polygonId === polygonId)
-        if (env) setPendingBoardPlacement({ polygonId, point, equipment })
-        return
-      }
-      handleCreateBoard({ polygonId, point, equipment, slotCount })
+      handleCreateBoard({ polygonId, point, equipment, slotCount: getBoardSlotCount(catalogItemId) })
       return
     }
 
@@ -990,6 +1112,7 @@ function App() {
     setSelectedEquipmentId(null)
     setSelectedBoardId(null)
     setSelectedAvOrganizerId(null)
+    setSelectedCustomBoardId(null)
     setRenamingCurtainId(null)
   }
 
@@ -1127,7 +1250,7 @@ function App() {
     }
   }
 
-  const handlePolygonTranslated = ({ polygonId, newPolygonPoints, equipmentPoints, boardPoints, avOrganizerPoints, curtainRects }) => {
+  const handlePolygonTranslated = ({ polygonId, newPolygonPoints, equipmentPoints, boardPoints, avOrganizerRects, customBoardRects, curtainRects }) => {
     if (!polygonId) return
 
     pushSnapshotMaybe()
@@ -1163,15 +1286,28 @@ function App() {
       )
     }
 
-    if (avOrganizerPoints?.length) {
-      const translatedPointByOrganizerId = Object.fromEntries(
-        avOrganizerPoints.map(({ avOrganizerId, point }) => [avOrganizerId, point]),
+    if (avOrganizerRects?.length) {
+      const rectById = Object.fromEntries(
+        avOrganizerRects.map(({ avOrganizerId, rectStart, rectEnd }) => [avOrganizerId, { rectStart, rectEnd }]),
       )
       setAvOrganizers((current) =>
         current.map((org) => {
-          const nextPoint = translatedPointByOrganizerId[org.id]
-          if (!nextPoint || org.polygonId !== polygonId) return org
-          return { ...org, point: nextPoint }
+          const next = rectById[org.id]
+          if (!next || org.polygonId !== polygonId) return org
+          return { ...org, rectStart: next.rectStart, rectEnd: next.rectEnd }
+        }),
+      )
+    }
+
+    if (customBoardRects?.length) {
+      const rectById = Object.fromEntries(
+        customBoardRects.map(({ customBoardId, rectStart, rectEnd }) => [customBoardId, { rectStart, rectEnd }]),
+      )
+      setCustomBoards((current) =>
+        current.map((b) => {
+          const next = rectById[b.id]
+          if (!next || b.polygonId !== polygonId) return b
+          return { ...b, rectStart: next.rectStart, rectEnd: next.rectEnd }
         }),
       )
     }
@@ -1494,12 +1630,20 @@ function App() {
     }
 
     if (node?.source === 'equipment-item') {
-      handleSelectEquipment(node.id)
+      if (placedCurtains.some((c) => c.id === node.id)) {
+        handleSelectCurtain(node.id)
+      } else {
+        handleSelectEquipment(node.id)
+      }
       return
     }
 
     if (node?.source === 'automation-board') {
-      handleSelectBoard(node.id)
+      if (customBoards.some((b) => b.id === node.id)) {
+        handleSelectCustomBoard(node.id)
+      } else {
+        handleSelectBoard(node.id)
+      }
       return
     }
 
@@ -1729,7 +1873,7 @@ function App() {
   const renamingAvOrganizerCanvasId = renamingAvOrganizerSource === 'canvas' ? renamingAvOrganizerId : null
   const selectedEnvironment = environments.find((environment) => environment.id === selectedEnvironmentId)
   const selectedPolygonId = selectedEnvironment?.polygonId ?? null
-  const selectedNodeId = selectedBoardId ?? selectedEquipmentId ?? selectedEnvironmentId
+  const selectedNodeId = selectedBoardId ?? selectedAvOrganizerId ?? selectedCustomBoardId ?? selectedCurtainId ?? selectedEquipmentId ?? selectedEnvironmentId
   const equipmentPropertiesEquipment = placedEquipments.find((equipment) => equipment.id === equipmentPropertiesId) ?? null
   const equipmentPropertiesLampCount = equipmentPropertiesEquipment?.circuitId
     ? placedEquipments.filter((e) => e.circuitId === equipmentPropertiesEquipment.circuitId).length
@@ -1919,22 +2063,36 @@ function App() {
                 onBoardMove={handleBoardMoved}
                 onBoardRename={handleBoardRenameRequest}
                 onBoardDelete={handleDeleteBoard}
-                onBoardEdit={handleBoardEditRequest}
                 onBoardLabelDoubleClick={handleBoardLabelDoubleClick}
                 onBoardLabelRenameCommit={handleCommitBoardLabelRename}
                 avOrganizers={avOrganizers}
                 selectedAvOrganizerId={selectedAvOrganizerId}
                 renamingAvOrganizerId={renamingAvOrganizerCanvasId}
+                pendingAvOrganizerEquipment={pendingAvOrganizerEquipment}
+                onAvOrganizerRectDrawn={handleAvOrganizerRectDrawn}
+                onAvOrganizerCancel={handleAvOrganizerCancel}
                 onAvOrganizerSelect={handleSelectAvOrganizer}
-                onAvOrganizerPinToggle={handleAvOrganizerPinToggle}
                 onAvOrganizerSlotInstall={handleAvOrganizerSlotInstall}
                 onAvOrganizerSlotRemove={handleAvOrganizerSlotRemove}
                 onAvOrganizerMove={handleAvOrganizerMoved}
                 onAvOrganizerRename={handleAvOrganizerRenameRequest}
                 onAvOrganizerDelete={handleDeleteAvOrganizer}
-                onAvOrganizerEdit={handleAvOrganizerEditRequest}
                 onAvOrganizerLabelDoubleClick={handleAvOrganizerLabelDoubleClick}
                 onAvOrganizerLabelRenameCommit={handleCommitAvOrganizerLabelRename}
+                customBoards={customBoards}
+                selectedCustomBoardId={selectedCustomBoardId}
+                renamingCustomBoardId={renamingCustomBoardId}
+                pendingCustomBoardEquipment={pendingCustomBoardEquipment}
+                onCustomBoardRectDrawn={handleCustomBoardRectDrawn}
+                onCustomBoardCancel={handleCustomBoardCancel}
+                onCustomBoardSelect={handleSelectCustomBoard}
+                onCustomBoardSlotInstall={handleCustomBoardSlotInstall}
+                onCustomBoardSlotRemove={handleCustomBoardSlotRemove}
+                onCustomBoardMove={handleCustomBoardMoved}
+                onCustomBoardRename={handleCustomBoardRenameRequest}
+                onCustomBoardDelete={handleDeleteCustomBoard}
+                onCustomBoardLabelDoubleClick={handleCustomBoardLabelDoubleClick}
+                onCustomBoardLabelRenameCommit={handleCommitCustomBoardLabelRename}
                 pendingCurtainEquipment={pendingCurtainEquipment}
                 placedCurtains={placedCurtains}
                 selectedCurtainId={selectedCurtainId}
@@ -1986,6 +2144,7 @@ function App() {
                   setSelectedEquipmentId(null)
                   setSelectedBoardId(null)
                   setSelectedAvOrganizerId(null)
+                  setSelectedCustomBoardId(null)
                   setSelectedCurtainId(null)
                 }}
                 onLabelClick={(polygonId) => {
@@ -2031,38 +2190,6 @@ function App() {
                 <EquipmentLibraryOverlay
                   onClose={() => setShowEquipmentLibrary(false)}
                   onStartMultiAddPlacement={handleStartMultiAddPlacement}
-                />
-              ) : null}
-              {pendingBoardPlacement ? (
-                <AutomationBoardOverlay
-                  onConfirm={({ columnCount }) => {
-                    handleCreateBoard({ ...pendingBoardPlacement, columnCount })
-                    setPendingBoardPlacement(null)
-                  }}
-                  onClose={() => setPendingBoardPlacement(null)}
-                />
-              ) : null}
-              {pendingAvOrganizerPlacement ? (
-                <AvOrganizerOverlay
-                  onConfirm={({ columnCount }) => {
-                    handleCreateAvOrganizer({ ...pendingAvOrganizerPlacement, columnCount })
-                    setPendingAvOrganizerPlacement(null)
-                  }}
-                  onClose={() => setPendingAvOrganizerPlacement(null)}
-                />
-              ) : null}
-              {editingBoardId ? (
-                <AutomationBoardOverlay
-                  initialColumns={automationBoards.find((b) => b.id === editingBoardId)?.columnCount}
-                  onConfirm={({ columnCount }) => handleBoardEditConfirm(editingBoardId, { columnCount })}
-                  onClose={() => setEditingBoardId(null)}
-                />
-              ) : null}
-              {editingAvOrganizerId ? (
-                <AvOrganizerOverlay
-                  initialColumns={avOrganizers.find((o) => o.id === editingAvOrganizerId)?.columnCount}
-                  onConfirm={({ columnCount }) => handleAvOrganizerEditConfirm(editingAvOrganizerId, { columnCount })}
-                  onClose={() => setEditingAvOrganizerId(null)}
                 />
               ) : null}
               {pendingOcPlacement ? (
