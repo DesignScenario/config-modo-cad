@@ -445,20 +445,26 @@ Estado **excluído** do snapshot (UI / viewport / efêmero): `activeTool`, `zoom
 
 ### Versionamento
 
-A versão da aplicação é injetada em tempo de build pelo Vite:
+A versão da aplicação é injetada em tempo de build pelo Vite a partir de um arquivo versionado, **não** de comando `git` algum:
 
 ```js
 // vite.config.js
-__APP_VERSION__ = `1.0.${git rev-list --count HEAD}`
+__APP_VERSION__ = JSON.parse(readFileSync('./src/version.json')).version
 ```
 
-O valor é exibido no footer/statusbar como `1.0.X` onde `X` é o total de commits. `__APP_VERSION__` está declarado como global `readonly` no `eslint.config.js`.
+`src/version.json` — `{ "version": "1.0.X" }` — é commitado junto com o código. O valor é exibido no footer/statusbar. `__APP_VERSION__` está declarado como global `readonly` no `eslint.config.js`.
 
-O número de versão incrementa **exclusivamente ao fazer um novo commit** — não por cada troca de mensagens no chat. O histórico de versões em `md/relatorio-modo-cad.md` deve registrar exatamente uma entrada por commit, com o número da versão correspondendo ao total de commits no momento do commit.
+**Atualização automática via hook `pre-commit`:** `.githooks/pre-commit` roda `node scripts/write-version.js` antes de cada commit, que calcula `git rev-list --count HEAD + 1` (a contagem do commit prestes a ser criado), grava em `src/version.json` e o inclui automaticamente no commit via `git add`. Isso mantém a regra "**incrementa exclusivamente ao fazer um novo commit**" sem exigir nenhuma ação manual.
 
-**Deploy no Vercel:** o Vercel faz clone raso por padrão (shallow clone), o que faz `git rev-list --count HEAD` retornar um número errado. O `vercel.json` na raiz do projeto corrige isso executando `git fetch --unshallow` antes do build:
+O hook fica em `.githooks/` (não em `.git/hooks/`, que não é versionado) e é ativado via `git config core.hooksPath .githooks`. O script `postinstall` do `package.json` roda esse comando automaticamente após `npm install`, então qualquer clone novo do repositório já sai com o hook ativo.
+
+O histórico de versões em `md/relatorio-modo-cad.md` deve registrar exatamente uma entrada por commit, com o número da versão correspondendo ao total de commits no momento do commit.
+
+**Por que não usar `git rev-list --count HEAD` direto no build (histórico até v1.0.22):** o ambiente de build do Vercel **não é um `git clone` tradicional** — ele materializa um clone raso (shallow) dos arquivos sem configurar nenhum remote git utilizável (`git remote -v` retorna vazio). Isso significa que `git fetch`/`--unshallow`/`--depth=N` executados no `buildCommand` **nunca conseguem** aprofundar o histórico ali, mesmo terminando com exit code 0 — o clone raso fica permanentemente travado na profundidade que o Vercel decidiu buscar, e `git rev-list --count HEAD` retorna sempre o mesmo número errado (constatado via `vercel.json` de diagnóstico: profundidade fixa, `git fetch` sem remote configurado, contagem invariável antes/depois do fetch). Por isso o cálculo foi movido para fora do build, para um arquivo estático gerado localmente (onde o histórico completo sempre existe).
+
+`vercel.json` voltou a ser trivial, sem nenhuma manipulação de git:
 ```json
-{ "buildCommand": "git fetch --unshallow 2>/dev/null || true && npm run build" }
+{ "buildCommand": "npm run build" }
 ```
 
 ### Padrão de overlays

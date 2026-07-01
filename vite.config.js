@@ -1,20 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { execSync } from 'child_process'
+import { readFileSync } from 'node:fs'
 
-function getCommitCount() {
+// Versao gravada em src/version.json pelo hook pre-commit (scripts/write-version.js).
+// Nao roda `git` aqui porque o ambiente de build do Vercel nao tem um remote
+// git configuravel para aprofundar o clone raso — ver CLAUDE.md (Versionamento).
+function getAppVersion() {
   try {
-    return parseInt(execSync('git rev-list --count HEAD', { encoding: 'utf8' }).trim(), 10)
+    const raw = readFileSync(new URL('./src/version.json', import.meta.url), 'utf8')
+    return JSON.parse(raw).version
   } catch {
-    return 0
+    return '1.0.0'
   }
 }
-
-const commitCount = getCommitCount()
 
 export default defineConfig({
   plugins: [react()],
   define: {
-    __APP_VERSION__: JSON.stringify(`1.0.${commitCount}`),
+    __APP_VERSION__: JSON.stringify(getAppVersion()),
   },
 })
