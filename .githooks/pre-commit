@@ -1,0 +1,5 @@
+#!/bin/sh
+# Atualiza src/version.json com o numero do commit que esta sendo criado
+# agora, antes que o commit seja finalizado, para que a mudanca entre no
+# mesmo commit. Ver scripts/write-version.js e CLAUDE.md (Versionamento).
+node scripts/write-version.js
