@@ -969,4 +969,50 @@ Usados no desenho inicial (2 cliques) e no arraste dos handles de redimensioname
 
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.20*
+### v1.0.24 — Correção do Versionamento no Vercel (Junho de 2026)
+
+O número de versão exibido no footer/statusbar ficava correto em ambiente local (`localhost`), mas travava permanentemente em `1.0.10` no deploy de produção do Vercel, mesmo após vários commits novos.
+
+#### 13.1 Causa Raiz
+
+`__APP_VERSION__` era calculado em `vite.config.js` rodando `git rev-list --count HEAD` no momento do build. Isso funciona localmente, onde o histórico do git está completo, mas **falha estruturalmente no Vercel**: o ambiente de build do Vercel não realiza um `git clone` tradicional — ele materializa um clone raso (shallow) do repositório sem configurar nenhum remote git utilizável (`git remote -v` retorna vazio). Diagnóstico feito via `buildCommand` temporário confirmou:
+
+- `is shallow: true`, antes e depois de qualquer tentativa de `git fetch`
+- `git fetch` retornava exit code `0` (sucesso) mas não tinha nenhum remote para buscar, então não fazia nada
+- Contagem de commits idêntica antes/depois do fetch
+
+Ou seja: **nenhuma variação de `git fetch --unshallow` / `--depth=N` no `buildCommand` jamais poderia ter funcionado** nesse ambiente — o clone raso do Vercel ficou permanentemente travado na profundidade que ele decidiu buscar (10 commits), independente do que fosse tentado no build.
+
+#### 13.2 Correção
+
+O cálculo da versão foi movido para **fora do processo de build**, para um arquivo versionado:
+
+| Peça | Papel |
+|---|---|
+| `src/version.json` | `{ "version": "1.0.X" }` — commitado junto com o código, lido pelo `vite.config.js` em build time (sem rodar `git`) |
+| `scripts/write-version.js` | Calcula `git rev-list --count HEAD + 1` (a contagem do commit prestes a ser criado) e grava/inclui `src/version.json` no commit |
+| `.githooks/pre-commit` | Roda `write-version.js` automaticamente antes de cada commit |
+| `package.json` → `postinstall` | Ativa `git config core.hooksPath .githooks` em qualquer clone novo do projeto |
+
+Como o cálculo passou a acontecer **localmente** (onde o histórico completo do git sempre existe) em vez de no build do Vercel, o valor gravado em `src/version.json` já chega correto e imutável no repositório — o Vercel só precisa ler o arquivo, sem executar nenhum comando `git`.
+
+`vercel.json` voltou a ser trivial:
+```json
+{ "buildCommand": "npm run build" }
+```
+
+#### 13.3 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/version.json` | Novo — armazena `{ "version": "1.0.X" }` |
+| `scripts/write-version.js` | Novo — calcula e grava a próxima versão |
+| `.githooks/pre-commit` | Novo — roda `write-version.js` antes de cada commit |
+| `.gitattributes` | Novo — força `eol=lf` em `.githooks/*` e `*.sh` para o hook funcionar corretamente entre sistemas operacionais |
+| `package.json` | Novo script `postinstall` que ativa `core.hooksPath` |
+| `vite.config.js` | `__APP_VERSION__` passa a ler `src/version.json` em vez de rodar `git rev-list --count HEAD` |
+| `vercel.json` | Simplificado de volta para `"buildCommand": "npm run build"` |
+
+---
+
+*Relatório atualizado em Junho de 2026 — v1.0.24*
