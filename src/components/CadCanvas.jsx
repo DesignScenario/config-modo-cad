@@ -10,6 +10,8 @@ import { isBoardOnlyItem, isAvOrganizerOnlyItem, WALL_SNAP_CATALOG_IDS, PIR_SENS
 const POLYGON_COLOR = '#6BC2F7'
 const RULER_COLOR = '#FC4242'
 const SELECTED_POLYGON_COLOR = '#0095ff'
+const WINDOW_SELECTION_COLOR = '#0095ff'
+const CROSSING_SELECTION_COLOR = '#2ecc71'
 const POLYGON_POINT_RADIUS = 4
 const POLYGON_POINT_STROKE = 2
 const POLYGON_LINE_STROKE = 2
@@ -266,6 +268,43 @@ function normToStage(normPoint, fittedImage) {
   }
 
   return rotatePoint(unrotatedPoint, fittedImage.center, fittedImage.rotation)
+}
+
+const ORTHO_SNAP_INCREMENT_DEG = 15
+
+// Snaps cursorStage to the nearest 15° increment measured from originStage (absolute horizontal),
+// preserving the distance between the two points.
+function snapPointToOrthoAngle(originStage, cursorStage, incrementDeg = ORTHO_SNAP_INCREMENT_DEG) {
+  const dx = cursorStage.x - originStage.x
+  const dy = cursorStage.y - originStage.y
+  const distance = Math.hypot(dx, dy)
+
+  if (distance < 1e-6) {
+    return cursorStage
+  }
+
+  const incrementRad = (incrementDeg * Math.PI) / 180
+  const snappedAngle = Math.round(Math.atan2(dy, dx) / incrementRad) * incrementRad
+
+  return {
+    x: originStage.x + Math.cos(snappedAngle) * distance,
+    y: originStage.y + Math.sin(snappedAngle) * distance,
+  }
+}
+
+// Ortho mode: while shiftKey is held, restricts the line from originNorm to the nearest
+// 15° increment. Runs in stage space so the angle stays visually consistent regardless
+// of the background image's aspect ratio.
+function applyOrthoSnap(originNorm, cursorNorm, fittedImage, shiftKey) {
+  if (!shiftKey || !originNorm) {
+    return cursorNorm
+  }
+
+  const originStage = normToStage(originNorm, fittedImage)
+  const cursorStage = normToStage(cursorNorm, fittedImage)
+  const snappedStage = snapPointToOrthoAngle(originStage, cursorStage)
+
+  return stageToNorm(snappedStage, fittedImage)
 }
 
 function normToImagePixels(normPoint, image) {
@@ -722,7 +761,6 @@ function CadCanvas({
   scaleDefinition,
   onPolygonSegmentCreated,
   onPolygonCreated,
-  onPolygonDeleted,
   deletePolygonId,
   deletePolygonIds,
   onMultiDeleteRequest,
@@ -823,6 +861,7 @@ function CadCanvas({
 }) {
   const containerRef = useRef(null)
   const stageRef = useRef(null)
+  const polygonIdCounterRef = useRef(0)
   const canvasRenameInputRef = useRef(null)
   const equipmentRenameInputRef = useRef(null)
   const boardRenameInputRef = useRef(null)
@@ -852,6 +891,10 @@ function CadCanvas({
   const [rubberBand, setRubberBand] = useState(null)
   const [multiSelectedPolygonIds, setMultiSelectedPolygonIds] = useState(new Set())
   const [multiSelectedEquipmentIds, setMultiSelectedEquipmentIds] = useState(new Set())
+  const [multiSelectedBoardIds, setMultiSelectedBoardIds] = useState(new Set())
+  const [multiSelectedCustomBoardIds, setMultiSelectedCustomBoardIds] = useState(new Set())
+  const [multiSelectedAvOrganizerIds, setMultiSelectedAvOrganizerIds] = useState(new Set())
+  const [multiSelectedCurtainIds, setMultiSelectedCurtainIds] = useState(new Set())
   const [draggingEquipment, setDraggingEquipment] = useState(null)
   const [draggingPolygon, setDraggingPolygon] = useState(null)
   const [draggingMulti, setDraggingMulti] = useState(null)
@@ -987,6 +1030,10 @@ function CadCanvas({
       setRubberBand(null)
       setMultiSelectedPolygonIds(new Set())
       setMultiSelectedEquipmentIds(new Set())
+      setMultiSelectedBoardIds(new Set())
+      setMultiSelectedCustomBoardIds(new Set())
+      setMultiSelectedAvOrganizerIds(new Set())
+      setMultiSelectedCurtainIds(new Set())
     }
     if (activeTool !== 'ruler' || !hasScaleDefinition) {
       setRulerDraftStart(null)
@@ -1316,11 +1363,27 @@ function CadCanvas({
   // Sync editing value when rename starts from outside (tree click).
   // Delete selected polygon on Delete key (select tool only).
   const triggerDelete = useCallback(() => {
-    const hasMultiSelection = multiSelectedPolygonIds.size > 0 || multiSelectedEquipmentIds.size > 0
+    const hasMultiSelection = multiSelectedPolygonIds.size > 0
+      || multiSelectedEquipmentIds.size > 0
+      || multiSelectedBoardIds.size > 0
+      || multiSelectedCustomBoardIds.size > 0
+      || multiSelectedAvOrganizerIds.size > 0
+      || multiSelectedCurtainIds.size > 0
     if (hasMultiSelection) {
-      onMultiDeleteRequest?.([...multiSelectedPolygonIds], [...multiSelectedEquipmentIds])
+      onMultiDeleteRequest?.({
+        polygonIds: [...multiSelectedPolygonIds],
+        equipmentIds: [...multiSelectedEquipmentIds],
+        boardIds: [...multiSelectedBoardIds],
+        customBoardIds: [...multiSelectedCustomBoardIds],
+        avOrganizerIds: [...multiSelectedAvOrganizerIds],
+        curtainIds: [...multiSelectedCurtainIds],
+      })
       setMultiSelectedPolygonIds(new Set())
       setMultiSelectedEquipmentIds(new Set())
+      setMultiSelectedBoardIds(new Set())
+      setMultiSelectedCustomBoardIds(new Set())
+      setMultiSelectedAvOrganizerIds(new Set())
+      setMultiSelectedCurtainIds(new Set())
       return
     }
 
@@ -1334,18 +1397,46 @@ function CadCanvas({
       return
     }
 
+    if (selectedBoardId && !renamingBoardId) {
+      onBoardDelete?.(selectedBoardId)
+      return
+    }
+
+    if (selectedCustomBoardId && !renamingCustomBoardId) {
+      onCustomBoardDelete?.(selectedCustomBoardId)
+      return
+    }
+
+    if (selectedAvOrganizerId && !renamingAvOrganizerId) {
+      onAvOrganizerDelete?.(selectedAvOrganizerId)
+      return
+    }
+
     if (selectedPolygonId && !renamingPolygonId) {
       onPolygonDeleteRequest?.(selectedPolygonId)
     }
   }, [
     multiSelectedPolygonIds,
     multiSelectedEquipmentIds,
+    multiSelectedBoardIds,
+    multiSelectedCustomBoardIds,
+    multiSelectedAvOrganizerIds,
+    multiSelectedCurtainIds,
     onMultiDeleteRequest,
     selectedEquipmentId,
     renamingEquipmentId,
     selectedCurtainId,
     renamingCurtainId,
     onCurtainDelete,
+    selectedBoardId,
+    renamingBoardId,
+    onBoardDelete,
+    selectedCustomBoardId,
+    renamingCustomBoardId,
+    onCustomBoardDelete,
+    selectedAvOrganizerId,
+    renamingAvOrganizerId,
+    onAvOrganizerDelete,
     selectedPolygonId,
     renamingPolygonId,
     onEquipmentDelete,
@@ -1383,12 +1474,17 @@ function CadCanvas({
           x2: Math.max(startStage.x, endStage.x),
           y2: Math.max(startStage.y, endStage.y),
         }
+        // Left-to-right drag = Window (fully contained only); right-to-left = Crossing (touches too).
+        const isWindowSelection = endStage.x >= startStage.x
+        const matchesRubberBand = (bounds) => (isWindowSelection
+          ? bounds.x1 >= rb.x1 && bounds.x2 <= rb.x2 && bounds.y1 >= rb.y1 && bounds.y2 <= rb.y2
+          : rectsIntersect(rb, bounds))
 
         const newPolygonIds = new Set()
         for (const polygon of polygons) {
           const stagePoints = polygon.points.map((p) => normToStage(p, fittedBackgroundImage))
           const b = getPolygonBounds(stagePoints)
-          if (rectsIntersect(rb, { x1: b.minX, y1: b.minY, x2: b.maxX, y2: b.maxY })) {
+          if (matchesRubberBand({ x1: b.minX, y1: b.minY, x2: b.maxX, y2: b.maxY })) {
             newPolygonIds.add(polygon.id)
           }
         }
@@ -1402,6 +1498,67 @@ function CadCanvas({
           }
         }
         setMultiSelectedEquipmentIds(newEquipmentIds)
+
+        // Automation boards are point-anchored but render as a real-size wireframe;
+        // approximate their footprint from the wireframe's physical dimensions so
+        // Window/Crossing behaves like it does for other area-based entities.
+        const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+        const stagePixelsPerMeter = scaleDefinition
+          ? scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+          : 0
+
+        const newBoardIds = new Set()
+        for (const board of (automationBoards ?? [])) {
+          const centerStage = normToStage(board.point, fittedBackgroundImage)
+          const wfEntry = EQUIPMENT_WIREFRAMES[board.catalogItemId] ?? null
+          const halfW = wfEntry && stagePixelsPerMeter ? ((wfEntry.widthMm / 1000) * stagePixelsPerMeter) / 2 : 0
+          const halfH = wfEntry && stagePixelsPerMeter ? ((wfEntry.heightMm / 1000) * stagePixelsPerMeter) / 2 : 0
+          const bounds = {
+            x1: centerStage.x - halfW,
+            y1: centerStage.y - halfH,
+            x2: centerStage.x + halfW,
+            y2: centerStage.y + halfH,
+          }
+          if (matchesRubberBand(bounds)) {
+            newBoardIds.add(board.id)
+          }
+        }
+        setMultiSelectedBoardIds(newBoardIds)
+
+        const rectEntityBounds = (item) => {
+          const p1 = normToStage(item.rectStart, fittedBackgroundImage)
+          const p2 = normToStage(item.rectEnd, fittedBackgroundImage)
+          return {
+            x1: Math.min(p1.x, p2.x),
+            y1: Math.min(p1.y, p2.y),
+            x2: Math.max(p1.x, p2.x),
+            y2: Math.max(p1.y, p2.y),
+          }
+        }
+
+        const newCustomBoardIds = new Set()
+        for (const board of (customBoards ?? [])) {
+          if (matchesRubberBand(rectEntityBounds(board))) {
+            newCustomBoardIds.add(board.id)
+          }
+        }
+        setMultiSelectedCustomBoardIds(newCustomBoardIds)
+
+        const newAvOrganizerIds = new Set()
+        for (const org of (avOrganizers ?? [])) {
+          if (matchesRubberBand(rectEntityBounds(org))) {
+            newAvOrganizerIds.add(org.id)
+          }
+        }
+        setMultiSelectedAvOrganizerIds(newAvOrganizerIds)
+
+        const newCurtainIds = new Set()
+        for (const curtain of (placedCurtains ?? [])) {
+          if (matchesRubberBand(rectEntityBounds(curtain))) {
+            newCurtainIds.add(curtain.id)
+          }
+        }
+        setMultiSelectedCurtainIds(newCurtainIds)
       }
 
       setRubberBand(null)
@@ -1409,7 +1566,18 @@ function CadCanvas({
 
     window.addEventListener('mouseup', handleMouseUp)
     return () => window.removeEventListener('mouseup', handleMouseUp)
-  }, [rubberBand, polygons, fittedBackgroundImage, placedEquipments])
+  }, [
+    rubberBand,
+    polygons,
+    fittedBackgroundImage,
+    placedEquipments,
+    automationBoards,
+    customBoards,
+    avOrganizers,
+    placedCurtains,
+    scaleDefinition,
+    loadedBackgroundImage,
+  ])
 
   useEffect(() => {
     if (activeTool !== 'polygon' && !SHAPE_DRAW_TOOLS.has(activeTool)) {
@@ -1437,19 +1605,24 @@ function CadCanvas({
     }
   }, [activeTool])
 
+  const closeAllContextMenus = () => {
+    setPolygonContextMenu(null)
+    setEquipmentContextMenu(null)
+    setBoardSlotContextMenu(null)
+    setBoardContextMenu(null)
+    setAvOrganizerContextMenu(null)
+    setCustomBoardContextMenu(null)
+    setCurtainContextMenu(null)
+  }
+
   useEffect(() => {
     const handleCloseContextMenu = () => {
-      setPolygonContextMenu(null)
-      setEquipmentContextMenu(null)
-      setBoardSlotContextMenu(null)
-      setBoardContextMenu(null)
+      closeAllContextMenus()
     }
 
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
-        setPolygonContextMenu(null)
-        setEquipmentContextMenu(null)
-        setBoardSlotContextMenu(null)
+        closeAllContextMenus()
       }
     }
 
@@ -1486,7 +1659,7 @@ function CadCanvas({
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
 
     onEquipmentSelect?.(equipmentId)
-    setPolygonContextMenu(null)
+    closeAllContextMenus()
     setEquipmentContextMenu({
       equipmentId,
       x: Math.max(4, x),
@@ -1641,7 +1814,6 @@ function CadCanvas({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draggingBoard, fittedBackgroundImage, onBoardMove, polygons, scaleDefinition, loadedBackgroundImage])
 
   useEffect(() => {
@@ -2146,6 +2318,25 @@ function CadCanvas({
           id: eq.id,
           point: shiftPoint(eq.initialPoint),
         })),
+        looseBoardUpdates: draggingMulti.looseBoards.map((b) => ({
+          id: b.id,
+          point: shiftPoint(b.initialPoint),
+        })),
+        looseCustomBoardUpdates: draggingMulti.looseCustomBoards.map((b) => ({
+          id: b.id,
+          rectStart: shiftPoint(b.initialRectStart),
+          rectEnd: shiftPoint(b.initialRectEnd),
+        })),
+        looseAvOrganizerUpdates: draggingMulti.looseAvOrganizers.map((o) => ({
+          id: o.id,
+          rectStart: shiftPoint(o.initialRectStart),
+          rectEnd: shiftPoint(o.initialRectEnd),
+        })),
+        looseCurtainUpdates: draggingMulti.looseCurtains.map((c) => ({
+          id: c.id,
+          rectStart: shiftPoint(c.initialRectStart),
+          rectEnd: shiftPoint(c.initialRectEnd),
+        })),
       })
 
       setDraggingMulti(null)
@@ -2240,43 +2431,178 @@ function CadCanvas({
     if (!alignRequest) return
     const { direction } = alignRequest
 
-    const hasMultiSelection = multiSelectedPolygonIds.size > 0 || multiSelectedEquipmentIds.size > 0
-    if (!hasMultiSelection) return
+    const hasMultiSelection = multiSelectedPolygonIds.size > 0
+      || multiSelectedEquipmentIds.size > 0
+      || multiSelectedBoardIds.size > 0
+      || multiSelectedCustomBoardIds.size > 0
+      || multiSelectedAvOrganizerIds.size > 0
+      || multiSelectedCurtainIds.size > 0
+    if (!hasMultiSelection || !fittedBackgroundImage) return
 
-    // Compute bounds for each selected polygon (normalized coords)
     const selectedPolygonItems = [...multiSelectedPolygonIds].flatMap((polygonId) => {
       const polygon = polygons.find((p) => p.id === polygonId)
       if (!polygon?.points?.length) return []
-      return [{ polygonId, polygon, bounds: getPolygonBounds(polygon.points) }]
+      return [{ polygonId, polygon }]
     })
-
-    // Equipment that is NOT contained in a selected polygon
     const selectedPolygonIdSet = new Set(selectedPolygonItems.map((p) => p.polygonId))
-    const selectedEquipmentItems = [...multiSelectedEquipmentIds].flatMap((equipmentId) => {
-      const eq = placedEquipments.find((e) => e.id === equipmentId)
-      if (!eq) return []
-      if (eq.polygonId && selectedPolygonIdSet.has(eq.polygonId)) return []
-      return [eq]
+
+    // Directly-selected items of every other type that are NOT contained in a selected
+    // polygon (those move as passengers of the polygon instead, via buildPolygonTranslation).
+    const selectedEquipmentItems = [...multiSelectedEquipmentIds].flatMap((id) => {
+      const item = placedEquipments.find((e) => e.id === id)
+      if (!item || (item.polygonId && selectedPolygonIdSet.has(item.polygonId))) return []
+      return [item]
+    })
+    const selectedBoardItems = [...multiSelectedBoardIds].flatMap((id) => {
+      const item = automationBoards.find((b) => b.id === id)
+      if (!item || (item.polygonId && selectedPolygonIdSet.has(item.polygonId))) return []
+      return [item]
+    })
+    const selectedAvOrganizerItems = [...multiSelectedAvOrganizerIds].flatMap((id) => {
+      const item = avOrganizers.find((o) => o.id === id)
+      if (!item || (item.polygonId && selectedPolygonIdSet.has(item.polygonId))) return []
+      return [item]
+    })
+    const selectedCustomBoardItems = [...multiSelectedCustomBoardIds].flatMap((id) => {
+      const item = (customBoards ?? []).find((b) => b.id === id)
+      if (!item || (item.polygonId && selectedPolygonIdSet.has(item.polygonId))) return []
+      return [item]
+    })
+    const selectedCurtainItems = [...multiSelectedCurtainIds].flatMap((id) => {
+      const item = (placedCurtains ?? []).find((c) => c.id === id)
+      if (!item || (item.polygonId && selectedPolygonIdSet.has(item.polygonId))) return []
+      return [item]
     })
 
-    if (!selectedPolygonItems.length && !selectedEquipmentItems.length) return
+    const totalCount = selectedPolygonItems.length + selectedEquipmentItems.length
+      + selectedBoardItems.length + selectedAvOrganizerItems.length
+      + selectedCustomBoardItems.length + selectedCurtainItems.length
+    if (!totalCount) return
+
+    // All bounds/deltas below are computed in stage-pixel space (not normalized), so that
+    // items with a real-scale wireframe (equipment, boards) are aligned/distributed by their
+    // actual rendered footprint instead of by their zero-size anchor point. Points are always
+    // converted individually via normToStage/stageToNorm (never a raw delta) so this stays
+    // correct even when the background image is rotated.
+    const imageNaturalWidth = loadedBackgroundImage?.naturalWidth || loadedBackgroundImage?.width || 1
+    const stagePixelsPerMeter = scaleDefinition
+      ? scaleDefinition.pixelsPerMeter * (fittedBackgroundImage.width / imageNaturalWidth)
+      : 0
+
+    const getWireframeStageDims = (catalogItemId) => {
+      const wfEntry = EQUIPMENT_WIREFRAMES[catalogItemId] ?? null
+      if (!wfEntry || !stagePixelsPerMeter) return null
+      return {
+        width: (wfEntry.widthMm / 1000) * stagePixelsPerMeter,
+        height: (wfEntry.heightMm / 1000) * stagePixelsPerMeter,
+      }
+    }
+
+    // Stage-space bounding box for a point-anchored item (equipment or board). Falls back to a
+    // zero-size box at the anchor point when there's no wireframe/scale. For wall-snapped
+    // equipment, the box is centered on the rendered wireframe (offset outward along
+    // wallNormal), matching what's actually drawn — but the returned dx/dy still gets applied
+    // to the raw anchor point, since that offset is constant under translation.
+    const pointItemStageBounds = (item) => {
+      const centerStage = normToStage(item.point, fittedBackgroundImage)
+      const wfDims = getWireframeStageDims(item.catalogItemId)
+      if (!wfDims) {
+        return { x1: centerStage.x, y1: centerStage.y, x2: centerStage.x, y2: centerStage.y }
+      }
+      let renderCX = centerStage.x
+      let renderCY = centerStage.y
+      if (item.wallNormal) {
+        const stageOrigin = normToStage({ x: 0, y: 0 }, fittedBackgroundImage)
+        const stageTip = normToStage({ x: item.wallNormal.x, y: item.wallNormal.y }, fittedBackgroundImage)
+        const wnSX = stageTip.x - stageOrigin.x
+        const wnSY = stageTip.y - stageOrigin.y
+        const wnSLen = Math.hypot(wnSX, wnSY)
+        if (wnSLen > 0) {
+          const wnNX = wnSX / wnSLen
+          const wnNY = wnSY / wnSLen
+          const halfExtent = Math.abs(wnNX) * (wfDims.width / 2) + Math.abs(wnNY) * (wfDims.height / 2)
+          renderCX += wnNX * halfExtent
+          renderCY += wnNY * halfExtent
+        }
+      }
+      return {
+        x1: renderCX - wfDims.width / 2,
+        y1: renderCY - wfDims.height / 2,
+        x2: renderCX + wfDims.width / 2,
+        y2: renderCY + wfDims.height / 2,
+      }
+    }
+
+    const rectItemStageBounds = (item) => {
+      const p1 = normToStage(item.rectStart, fittedBackgroundImage)
+      const p2 = normToStage(item.rectEnd, fittedBackgroundImage)
+      return {
+        x1: Math.min(p1.x, p2.x), y1: Math.min(p1.y, p2.y),
+        x2: Math.max(p1.x, p2.x), y2: Math.max(p1.y, p2.y),
+      }
+    }
+
+    const polygonStageBounds = (polygon) => {
+      const b = getPolygonBounds(polygon.points.map((p) => normToStage(p, fittedBackgroundImage)))
+      return { x1: b.minX, y1: b.minY, x2: b.maxX, y2: b.maxY }
+    }
+
+    // Shifts a normalized point by a stage-pixel delta, converting through stage space so
+    // rotation of the background image is handled correctly (never adds dx/dy to norm coords directly).
+    const shiftPointByStageDelta = (normPoint, dxStage, dyStage) => {
+      const stagePt = normToStage(normPoint, fittedBackgroundImage)
+      return stageToNorm({ x: stagePt.x + dxStage, y: stagePt.y + dyStage }, fittedBackgroundImage)
+    }
+
+    // Builds the passenger payload for a polygon translated by (dxStage, dyStage) — every
+    // equipment/board/AV organizer/custom board/curtain that belongs to it moves along automatically.
+    const buildPolygonTranslation = (polygonId, dxStage, dyStage) => {
+      const shiftPoint = (normPoint) => shiftPointByStageDelta(normPoint, dxStage, dyStage)
+      const polyRef = polygons.find((p) => p.id === polygonId)
+      const eqInPoly = placedEquipments.filter((e) => e.polygonId === polygonId)
+      const boardsInPoly = automationBoards.filter((b) => b.polygonId === polygonId)
+      const orgsInPoly = avOrganizers.filter((o) => o.polygonId === polygonId)
+      const customBoardsInPoly = (customBoards ?? []).filter((b) => b.polygonId === polygonId)
+      const curtainsInPoly = (placedCurtains ?? []).filter((c) => c.polygonId === polygonId)
+      return {
+        polygonId,
+        newPolygonPoints: polyRef ? polyRef.points.map(shiftPoint) : undefined,
+        equipmentPoints: eqInPoly.map((e) => ({ equipmentId: e.id, point: shiftPoint(e.point) })),
+        boardPoints: boardsInPoly.map((b) => ({ boardId: b.id, point: shiftPoint(b.point) })),
+        avOrganizerRects: orgsInPoly.map((o) => ({ avOrganizerId: o.id, rectStart: shiftPoint(o.rectStart), rectEnd: shiftPoint(o.rectEnd) })),
+        customBoardRects: customBoardsInPoly.map((b) => ({ customBoardId: b.id, rectStart: shiftPoint(b.rectStart), rectEnd: shiftPoint(b.rectEnd) })),
+        curtainRects: curtainsInPoly.map((c) => ({ curtainId: c.id, rectStart: shiftPoint(c.rectStart), rectEnd: shiftPoint(c.rectEnd) })),
+      }
+    }
 
     // Distribution (espaçar): equal gaps between items along one axis
     if (direction === 'distribute-x' || direction === 'distribute-y') {
       const isX = direction === 'distribute-x'
       const allItems = [
-        ...selectedPolygonItems.map(({ polygonId, polygon, bounds }) => ({
-          type: 'polygon', id: polygonId, polygon,
-          leading: isX ? bounds.minX : bounds.minY,
-          trailing: isX ? bounds.maxX : bounds.maxY,
-          dx: 0, dy: 0,
-        })),
-        ...selectedEquipmentItems.map((eq) => ({
-          type: 'equipment', id: eq.id, eq,
-          leading: isX ? eq.point.x : eq.point.y,
-          trailing: isX ? eq.point.x : eq.point.y,
-          dx: 0, dy: 0,
-        })),
+        ...selectedPolygonItems.map(({ polygonId, polygon }) => {
+          const b = polygonStageBounds(polygon)
+          return { type: 'polygon', id: polygonId, leading: isX ? b.x1 : b.y1, trailing: isX ? b.x2 : b.y2, dx: 0, dy: 0 }
+        }),
+        ...selectedEquipmentItems.map((item) => {
+          const b = pointItemStageBounds(item)
+          return { type: 'equipment', id: item.id, ref: item, leading: isX ? b.x1 : b.y1, trailing: isX ? b.x2 : b.y2, dx: 0, dy: 0 }
+        }),
+        ...selectedBoardItems.map((item) => {
+          const b = pointItemStageBounds(item)
+          return { type: 'board', id: item.id, ref: item, leading: isX ? b.x1 : b.y1, trailing: isX ? b.x2 : b.y2, dx: 0, dy: 0 }
+        }),
+        ...selectedAvOrganizerItems.map((item) => {
+          const b = rectItemStageBounds(item)
+          return { type: 'avOrganizer', id: item.id, ref: item, leading: isX ? b.x1 : b.y1, trailing: isX ? b.x2 : b.y2, dx: 0, dy: 0 }
+        }),
+        ...selectedCustomBoardItems.map((item) => {
+          const b = rectItemStageBounds(item)
+          return { type: 'customBoard', id: item.id, ref: item, leading: isX ? b.x1 : b.y1, trailing: isX ? b.x2 : b.y2, dx: 0, dy: 0 }
+        }),
+        ...selectedCurtainItems.map((item) => {
+          const b = rectItemStageBounds(item)
+          return { type: 'curtain', id: item.id, ref: item, leading: isX ? b.x1 : b.y1, trailing: isX ? b.x2 : b.y2, dx: 0, dy: 0 }
+        }),
       ]
       if (allItems.length >= 3) {
         allItems.sort((a, b) => a.leading - b.leading)
@@ -2292,104 +2618,110 @@ function CadCanvas({
           else item.dy = delta
           cursor += (item.trailing - item.leading) + gap
         }
-        const polygonUpdates = allItems.filter((item) => item.type === 'polygon' && (item.dx || item.dy))
-        if (polygonUpdates.length) {
+
+        const moved = (type) => allItems.filter((item) => item.type === type && (item.dx || item.dy))
+        const movedPolygons = moved('polygon')
+
+        if (movedPolygons.length) {
           setPolygons((current) => current.map((polygon) => {
-            const upd = polygonUpdates.find((u) => u.id === polygon.id)
+            const upd = movedPolygons.find((u) => u.id === polygon.id)
             if (!upd) return polygon
-            return { ...polygon, points: polygon.points.map((p) => ({ x: p.x + upd.dx, y: p.y + upd.dy })) }
+            return { ...polygon, points: polygon.points.map((p) => shiftPointByStageDelta(p, upd.dx, upd.dy)) }
           }))
-          for (const { id: polygonId, dx, dy } of polygonUpdates) {
-            const polyRef = polygons.find((p) => p.id === polygonId)
-            const eqInPoly = placedEquipments.filter((e) => e.polygonId === polygonId)
-            const boardsInPoly = automationBoards.filter((b) => b.polygonId === polygonId)
-            const orgsInPoly = avOrganizers.filter((o) => o.polygonId === polygonId)
-            onPolygonTranslated?.({
-              polygonId,
-              newPolygonPoints: polyRef ? polyRef.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) : undefined,
-              equipmentPoints: eqInPoly.map((e) => ({ equipmentId: e.id, point: { x: e.point.x + dx, y: e.point.y + dy } })),
-              boardPoints: boardsInPoly.map((b) => ({ boardId: b.id, point: { x: b.point.x + dx, y: b.point.y + dy } })),
-              avOrganizerPoints: orgsInPoly.map((o) => ({ avOrganizerId: o.id, point: { x: o.point.x + dx, y: o.point.y + dy } })),
-            })
-          }
         }
-        const eqUpdates = allItems.filter((item) => item.type === 'equipment' && (item.dx || item.dy))
-        if (eqUpdates.length) {
-          onEquipmentPointsUpdate?.(eqUpdates.map(({ id, eq, dx, dy }) => ({
-            id, point: { x: eq.point.x + dx, y: eq.point.y + dy },
-          })))
-        }
+
+        onMultiTranslated?.({
+          polygonTranslations: movedPolygons.map(({ id, dx, dy }) => buildPolygonTranslation(id, dx, dy)),
+          looseEquipmentUpdates: moved('equipment').map(({ ref, dx, dy }) => ({ id: ref.id, point: shiftPointByStageDelta(ref.point, dx, dy) })),
+          looseBoardUpdates: moved('board').map(({ ref, dx, dy }) => ({ id: ref.id, point: shiftPointByStageDelta(ref.point, dx, dy) })),
+          looseAvOrganizerUpdates: moved('avOrganizer').map(({ ref, dx, dy }) => ({
+            id: ref.id,
+            rectStart: shiftPointByStageDelta(ref.rectStart, dx, dy),
+            rectEnd: shiftPointByStageDelta(ref.rectEnd, dx, dy),
+          })),
+          looseCustomBoardUpdates: moved('customBoard').map(({ ref, dx, dy }) => ({
+            id: ref.id,
+            rectStart: shiftPointByStageDelta(ref.rectStart, dx, dy),
+            rectEnd: shiftPointByStageDelta(ref.rectEnd, dx, dy),
+          })),
+          looseCurtainUpdates: moved('curtain').map(({ ref, dx, dy }) => ({
+            id: ref.id,
+            rectStart: shiftPointByStageDelta(ref.rectStart, dx, dy),
+            rectEnd: shiftPointByStageDelta(ref.rectEnd, dx, dy),
+          })),
+        })
       }
       onAlignConsumed?.()
       return
     }
 
-    // Collect all bounds to find reference edge
+    // Align: collect all bounds (stage-pixel space) to find the reference edge/center
     const allBounds = [
-      ...selectedPolygonItems.map(({ bounds }) => bounds),
-      ...selectedEquipmentItems.map((eq) => ({
-        minX: eq.point.x, maxX: eq.point.x, minY: eq.point.y, maxY: eq.point.y,
-      })),
+      ...selectedPolygonItems.map(({ polygon }) => polygonStageBounds(polygon)),
+      ...selectedEquipmentItems.map(pointItemStageBounds),
+      ...selectedBoardItems.map(pointItemStageBounds),
+      ...selectedAvOrganizerItems.map(rectItemStageBounds),
+      ...selectedCustomBoardItems.map(rectItemStageBounds),
+      ...selectedCurtainItems.map(rectItemStageBounds),
     ]
 
     let refValue
-    if (direction === 'left') refValue = Math.min(...allBounds.map((b) => b.minX))
-    else if (direction === 'right') refValue = Math.max(...allBounds.map((b) => b.maxX))
-    else if (direction === 'top') refValue = Math.min(...allBounds.map((b) => b.minY))
-    else if (direction === 'bottom') refValue = Math.max(...allBounds.map((b) => b.maxY))
-    else if (direction === 'center-x') refValue = (Math.min(...allBounds.map((b) => b.minX)) + Math.max(...allBounds.map((b) => b.maxX))) / 2
-    else refValue = (Math.min(...allBounds.map((b) => b.minY)) + Math.max(...allBounds.map((b) => b.maxY))) / 2
+    if (direction === 'left') refValue = Math.min(...allBounds.map((b) => b.x1))
+    else if (direction === 'right') refValue = Math.max(...allBounds.map((b) => b.x2))
+    else if (direction === 'top') refValue = Math.min(...allBounds.map((b) => b.y1))
+    else if (direction === 'bottom') refValue = Math.max(...allBounds.map((b) => b.y2))
+    else if (direction === 'center-x') refValue = (Math.min(...allBounds.map((b) => b.x1)) + Math.max(...allBounds.map((b) => b.x2))) / 2
+    else refValue = (Math.min(...allBounds.map((b) => b.y1)) + Math.max(...allBounds.map((b) => b.y2))) / 2
+
+    // Computes the (dx, dy) stage-pixel delta needed to move a bounding box to refValue.
+    const deltaFor = (b) => {
+      if (direction === 'left') return { dx: refValue - b.x1, dy: 0 }
+      if (direction === 'right') return { dx: refValue - b.x2, dy: 0 }
+      if (direction === 'top') return { dx: 0, dy: refValue - b.y1 }
+      if (direction === 'bottom') return { dx: 0, dy: refValue - b.y2 }
+      if (direction === 'center-x') return { dx: refValue - (b.x1 + b.x2) / 2, dy: 0 }
+      return { dx: 0, dy: refValue - (b.y1 + b.y2) / 2 }
+    }
 
     // Translate polygons
-    if (selectedPolygonItems.length) {
-      const polygonDeltas = selectedPolygonItems.map(({ polygonId, bounds }) => {
-        let dx = 0
-        let dy = 0
-        if (direction === 'left') dx = refValue - bounds.minX
-        else if (direction === 'right') dx = refValue - bounds.maxX
-        else if (direction === 'top') dy = refValue - bounds.minY
-        else if (direction === 'bottom') dy = refValue - bounds.maxY
-        else if (direction === 'center-x') dx = refValue - (bounds.minX + bounds.maxX) / 2
-        else dy = refValue - (bounds.minY + bounds.maxY) / 2
-        return { polygonId, dx, dy }
-      })
+    const polygonDeltas = selectedPolygonItems.map(({ polygonId, polygon }) => {
+      const { dx, dy } = deltaFor(polygonStageBounds(polygon))
+      return { polygonId, dx, dy }
+    }).filter(({ dx, dy }) => dx || dy)
 
+    if (polygonDeltas.length) {
       setPolygons((current) => current.map((polygon) => {
         const delta = polygonDeltas.find((d) => d.polygonId === polygon.id)
-        if (!delta || (!delta.dx && !delta.dy)) return polygon
+        if (!delta) return polygon
         return {
           ...polygon,
-          points: polygon.points.map((p) => ({ x: p.x + delta.dx, y: p.y + delta.dy })),
+          points: polygon.points.map((p) => shiftPointByStageDelta(p, delta.dx, delta.dy)),
         }
       }))
+    }
 
-      for (const { polygonId, dx, dy } of polygonDeltas) {
-        if (!dx && !dy) continue
-        const polyRef = polygons.find((p) => p.id === polygonId)
-        const eqInPoly = placedEquipments.filter((e) => e.polygonId === polygonId)
-        const boardsInPoly = automationBoards.filter((b) => b.polygonId === polygonId)
-        const orgsInPoly = avOrganizers.filter((o) => o.polygonId === polygonId)
-        onPolygonTranslated?.({
-          polygonId,
-          newPolygonPoints: polyRef ? polyRef.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) : undefined,
-          equipmentPoints: eqInPoly.map((e) => ({ equipmentId: e.id, point: { x: e.point.x + dx, y: e.point.y + dy } })),
-          boardPoints: boardsInPoly.map((b) => ({ boardId: b.id, point: { x: b.point.x + dx, y: b.point.y + dy } })),
-          avOrganizerPoints: orgsInPoly.map((o) => ({ avOrganizerId: o.id, point: { x: o.point.x + dx, y: o.point.y + dy } })),
-        })
+    // Translate standalone (loose) items of every other type to the same reference edge/axis.
+    const pointRefUpdate = (item) => {
+      const { dx, dy } = deltaFor(pointItemStageBounds(item))
+      return { id: item.id, point: shiftPointByStageDelta(item.point, dx, dy) }
+    }
+    const rectRefUpdate = (item) => {
+      const { dx, dy } = deltaFor(rectItemStageBounds(item))
+      return {
+        id: item.id,
+        rectStart: shiftPointByStageDelta(item.rectStart, dx, dy),
+        rectEnd: shiftPointByStageDelta(item.rectEnd, dx, dy),
       }
     }
 
-    // Translate standalone equipment
-    if (selectedEquipmentItems.length) {
-      const updates = selectedEquipmentItems.map((eq) => {
-        const movesX = direction === 'left' || direction === 'right' || direction === 'center-x'
-        const newPoint = movesX
-          ? { x: refValue, y: eq.point.y }
-          : { x: eq.point.x, y: refValue }
-        return { id: eq.id, point: newPoint }
-      })
-      onEquipmentPointsUpdate?.(updates)
-    }
+    onMultiTranslated?.({
+      polygonTranslations: polygonDeltas.map(({ polygonId, dx, dy }) => buildPolygonTranslation(polygonId, dx, dy)),
+      looseEquipmentUpdates: selectedEquipmentItems.map(pointRefUpdate),
+      looseBoardUpdates: selectedBoardItems.map(pointRefUpdate),
+      looseAvOrganizerUpdates: selectedAvOrganizerItems.map(rectRefUpdate),
+      looseCustomBoardUpdates: selectedCustomBoardItems.map(rectRefUpdate),
+      looseCurtainUpdates: selectedCurtainItems.map(rectRefUpdate),
+    })
 
     onAlignConsumed?.()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2476,6 +2808,10 @@ function CadCanvas({
       // Clear multi-selection and start rubber band
       setMultiSelectedPolygonIds(new Set())
       setMultiSelectedEquipmentIds(new Set())
+      setMultiSelectedBoardIds(new Set())
+      setMultiSelectedCustomBoardIds(new Set())
+      setMultiSelectedAvOrganizerIds(new Set())
+      setMultiSelectedCurtainIds(new Set())
       onEquipmentSelect?.(null)
       onCanvasBackgroundClick?.()
 
@@ -2519,7 +2855,8 @@ function CadCanvas({
       const box = computeShapeBox(startStage, cursorStage, mods.shiftKey, mods.altKey, activeTool)
       const shapePoints = pointsFromShapeBox(box, activeTool)
         .map((p) => stageToNorm(p, fittedBackgroundImage))
-      const polygonId = `polygon-${Date.now()}-${Math.round(startStage.x)}-${Math.round(startStage.y)}`
+      polygonIdCounterRef.current += 1
+      const polygonId = `polygon-${polygonIdCounterRef.current}-${Math.round(startStage.x)}-${Math.round(startStage.y)}`
       const completedPolygon = {
         id: polygonId,
         points: shapePoints,
@@ -2563,11 +2900,12 @@ function CadCanvas({
         return
       }
 
-      const scaleDraftStartStage = normToStage(scaleDraftStart, fittedBackgroundImage)
+      const orthoShiftKey = e?.evt?.shiftKey ?? false
+      const scaleSegmentEnd = applyOrthoSnap(scaleDraftStart, normPoint, fittedBackgroundImage, orthoShiftKey)
       const completedSegment = {
         start: scaleDraftStart,
-        end: normPoint,
-        lengthPixels: getImagePixelDistance(scaleDraftStart, normPoint, loadedBackgroundImage),
+        end: scaleSegmentEnd,
+        lengthPixels: getImagePixelDistance(scaleDraftStart, scaleSegmentEnd, loadedBackgroundImage),
       }
 
       setScaleReferenceSegment(completedSegment)
@@ -2590,7 +2928,8 @@ function CadCanvas({
     // Compare hit distance in stage-space so the threshold stays as physical pixels.
     const firstPointStage = normToStage(draftPolygonPoints[0], fittedBackgroundImage)
     if (draftPolygonPoints.length >= 3 && isNearPoint(rawPoint, firstPointStage, CLOSE_POLYGON_HIT_DISTANCE)) {
-      const polygonId = `polygon-${Date.now()}-${Math.round(firstPointStage.x)}-${Math.round(firstPointStage.y)}`
+      polygonIdCounterRef.current += 1
+      const polygonId = `polygon-${polygonIdCounterRef.current}-${Math.round(firstPointStage.x)}-${Math.round(firstPointStage.y)}`
       const completedPolygon = {
         id: polygonId,
         points: draftPolygonPoints,
@@ -2605,7 +2944,11 @@ function CadCanvas({
       return
     }
 
-    setDraftPolygonPoints((currentPoints) => [...currentPoints, normPoint])
+    const orthoShiftKey = e?.evt?.shiftKey ?? false
+    const lastPolygonPoint = draftPolygonPoints[draftPolygonPoints.length - 1]
+    const nextPolygonPoint = applyOrthoSnap(lastPolygonPoint, normPoint, fittedBackgroundImage, orthoShiftKey)
+
+    setDraftPolygonPoints((currentPoints) => [...currentPoints, nextPolygonPoint])
   }
 
   const tryHandleMultiAddClick = (forcedPolygonId = null) => {
@@ -2690,11 +3033,39 @@ function CadCanvas({
       .filter((eq) => !multiSelectedPolygonIds.has(eq.polygonId))
       .map((eq) => ({ id: eq.id, initialPoint: { ...eq.point } }))
 
+    const looseBoards = [...multiSelectedBoardIds]
+      .map((bid) => (automationBoards ?? []).find((b) => b.id === bid))
+      .filter(Boolean)
+      .filter((b) => !multiSelectedPolygonIds.has(b.polygonId))
+      .map((b) => ({ id: b.id, initialPoint: { ...b.point } }))
+
+    const looseCustomBoards = [...multiSelectedCustomBoardIds]
+      .map((bid) => (customBoards ?? []).find((b) => b.id === bid))
+      .filter(Boolean)
+      .filter((b) => !multiSelectedPolygonIds.has(b.polygonId))
+      .map((b) => ({ id: b.id, initialRectStart: { ...b.rectStart }, initialRectEnd: { ...b.rectEnd } }))
+
+    const looseAvOrganizers = [...multiSelectedAvOrganizerIds]
+      .map((oid) => (avOrganizers ?? []).find((o) => o.id === oid))
+      .filter(Boolean)
+      .filter((o) => !multiSelectedPolygonIds.has(o.polygonId))
+      .map((o) => ({ id: o.id, initialRectStart: { ...o.rectStart }, initialRectEnd: { ...o.rectEnd } }))
+
+    const looseCurtains = [...multiSelectedCurtainIds]
+      .map((cid) => (placedCurtains ?? []).find((c) => c.id === cid))
+      .filter(Boolean)
+      .filter((c) => !multiSelectedPolygonIds.has(c.polygonId))
+      .map((c) => ({ id: c.id, initialRectStart: { ...c.rectStart }, initialRectEnd: { ...c.rectEnd } }))
+
     return {
       startStagePoint: stagePoint,
       stageDelta: { x: 0, y: 0 },
       polygons: polyData,
       looseEquipments,
+      looseBoards,
+      looseCustomBoards,
+      looseAvOrganizers,
+      looseCurtains,
     }
   }
 
@@ -2731,6 +3102,10 @@ function CadCanvas({
     // Regular click: clear multi-selection, proceed with single select
     setMultiSelectedPolygonIds(new Set())
     setMultiSelectedEquipmentIds(new Set())
+    setMultiSelectedBoardIds(new Set())
+    setMultiSelectedCustomBoardIds(new Set())
+    setMultiSelectedAvOrganizerIds(new Set())
+    setMultiSelectedCurtainIds(new Set())
     onEquipmentSelect?.(null)
 
     if (selectedPolygonId === polygonId && event.evt.button === 0) {
@@ -2787,6 +3162,7 @@ function CadCanvas({
     onEquipmentSelect?.(null)
     onPolygonContextMenu?.(polygonId)
     onPolygonSelect?.(polygonId)
+    closeAllContextMenus()
     setPolygonContextMenu({
       polygonId,
       x: Math.max(4, x),
@@ -2844,6 +3220,10 @@ function CadCanvas({
     if (equipment.circuitId && event.detail >= 2) {
       setMultiSelectedPolygonIds(new Set())
       setMultiSelectedEquipmentIds(new Set())
+      setMultiSelectedBoardIds(new Set())
+      setMultiSelectedCustomBoardIds(new Set())
+      setMultiSelectedAvOrganizerIds(new Set())
+      setMultiSelectedCurtainIds(new Set())
       onEquipmentSelect?.(equipment.id)
       return
     }
@@ -2860,6 +3240,10 @@ function CadCanvas({
       const leader = circuitMembers.find((eq) => eq.isCircuitLeader) ?? circuitMembers[0]
       setMultiSelectedPolygonIds(new Set())
       setMultiSelectedEquipmentIds(new Set(circuitMembers.map((eq) => eq.id)))
+      setMultiSelectedBoardIds(new Set())
+      setMultiSelectedCustomBoardIds(new Set())
+      setMultiSelectedAvOrganizerIds(new Set())
+      setMultiSelectedCurtainIds(new Set())
       onEquipmentSelect?.(leader?.id ?? equipment.id)
 
       const container = containerRef.current
@@ -2910,6 +3294,10 @@ function CadCanvas({
     // Regular click: clear multi-selection, proceed with single select
     setMultiSelectedPolygonIds(new Set())
     setMultiSelectedEquipmentIds(new Set())
+    setMultiSelectedBoardIds(new Set())
+    setMultiSelectedCustomBoardIds(new Set())
+    setMultiSelectedAvOrganizerIds(new Set())
+    setMultiSelectedCurtainIds(new Set())
 
     if (selectedEquipmentId !== equipment.id) {
       onEquipmentSelect?.(equipment.id)
@@ -2944,6 +3332,38 @@ function CadCanvas({
     if (event.button !== 0) return
     event.stopPropagation()
     event.preventDefault()
+
+    // Shift+click: toggle board in multi-selection
+    if (event.shiftKey) {
+      setMultiSelectedBoardIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(board.id)) next.delete(board.id)
+        else next.add(board.id)
+        return next
+      })
+      return
+    }
+
+    // Multi-drag: clicked board is part of an active multi-selection
+    if (multiSelectedBoardIds.has(board.id)) {
+      const container = containerRef.current
+      if (!container) return
+      const bounds = container.getBoundingClientRect()
+      const stagePoint = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+      boardHoldTimerRef.current = window.setTimeout(() => {
+        setDraggingMulti(buildMultiDragState(stagePoint))
+        boardHoldTimerRef.current = null
+      }, EQUIPMENT_HOLD_TO_DRAG_MS)
+      return
+    }
+
+    // Regular click: clear other multi-selections, proceed with single select
+    setMultiSelectedPolygonIds(new Set())
+    setMultiSelectedEquipmentIds(new Set())
+    setMultiSelectedBoardIds(new Set())
+    setMultiSelectedCustomBoardIds(new Set())
+    setMultiSelectedAvOrganizerIds(new Set())
+    setMultiSelectedCurtainIds(new Set())
 
     if (selectedBoardId !== board.id) {
       onBoardSelect?.(board.id)
@@ -2982,9 +3402,7 @@ function CadCanvas({
     const menuHeight = isDynamic ? 90 : 60
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
-    setEquipmentContextMenu(null)
-    setPolygonContextMenu(null)
-    setBoardSlotContextMenu(null)
+    closeAllContextMenus()
     setBoardContextMenu({
       boardId,
       isDynamic,
@@ -2999,6 +3417,38 @@ function CadCanvas({
     if (resizingAvOrganizer?.id === org.id) return
     event.stopPropagation()
     event.preventDefault()
+
+    // Shift+click: toggle organizer in multi-selection
+    if (event.shiftKey) {
+      setMultiSelectedAvOrganizerIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(org.id)) next.delete(org.id)
+        else next.add(org.id)
+        return next
+      })
+      return
+    }
+
+    // Multi-drag: clicked organizer is part of an active multi-selection
+    if (multiSelectedAvOrganizerIds.has(org.id)) {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const stagePoint = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      avOrganizerHoldTimerRef.current = window.setTimeout(() => {
+        avOrganizerHoldTimerRef.current = null
+        setDraggingMulti(buildMultiDragState(stagePoint))
+      }, 180)
+      return
+    }
+
+    // Regular click: clear other multi-selections, proceed with single select
+    setMultiSelectedPolygonIds(new Set())
+    setMultiSelectedEquipmentIds(new Set())
+    setMultiSelectedBoardIds(new Set())
+    setMultiSelectedCustomBoardIds(new Set())
+    setMultiSelectedAvOrganizerIds(new Set())
+    setMultiSelectedCurtainIds(new Set())
 
     onAvOrganizerSelect?.(org.id)
     if (!fittedBackgroundImage) return
@@ -3036,8 +3486,7 @@ function CadCanvas({
     const menuHeight = 90
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
-    setEquipmentContextMenu(null)
-    setPolygonContextMenu(null)
+    closeAllContextMenus()
     setAvOrganizerContextMenu({
       organizerId,
       x: Math.max(4, x),
@@ -3051,6 +3500,39 @@ function CadCanvas({
     if (resizingCustomBoard?.id === board.id) return
     event.stopPropagation()
     event.preventDefault()
+
+    // Shift+click: toggle custom board in multi-selection
+    if (event.shiftKey) {
+      setMultiSelectedCustomBoardIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(board.id)) next.delete(board.id)
+        else next.add(board.id)
+        return next
+      })
+      return
+    }
+
+    // Multi-drag: clicked custom board is part of an active multi-selection
+    if (multiSelectedCustomBoardIds.has(board.id)) {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const stagePoint = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      customBoardHoldTimerRef.current = window.setTimeout(() => {
+        customBoardHoldTimerRef.current = null
+        setDraggingMulti(buildMultiDragState(stagePoint))
+      }, 180)
+      return
+    }
+
+    // Regular click: clear other multi-selections, proceed with single select
+    setMultiSelectedPolygonIds(new Set())
+    setMultiSelectedEquipmentIds(new Set())
+    setMultiSelectedBoardIds(new Set())
+    setMultiSelectedCustomBoardIds(new Set())
+    setMultiSelectedAvOrganizerIds(new Set())
+    setMultiSelectedCurtainIds(new Set())
+
     onCustomBoardSelect?.(board.id)
     if (!fittedBackgroundImage) return
     const container = containerRef.current
@@ -3087,8 +3569,7 @@ function CadCanvas({
     const menuHeight = 90
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
-    setEquipmentContextMenu(null)
-    setPolygonContextMenu(null)
+    closeAllContextMenus()
     setCustomBoardContextMenu({
       boardId,
       x: Math.max(4, x),
@@ -3107,9 +3588,7 @@ function CadCanvas({
     const menuHeight = 126
     const x = Math.min(event.clientX - bounds.left, bounds.width - menuWidth - 4)
     const y = Math.min(event.clientY - bounds.top, bounds.height - menuHeight - 4)
-    setEquipmentContextMenu(null)
-    setPolygonContextMenu(null)
-    setAvOrganizerContextMenu(null)
+    closeAllContextMenus()
     setCurtainContextMenu({ curtainId, x: Math.max(4, x), y: Math.max(4, y) })
   }
 
@@ -3184,7 +3663,9 @@ function CadCanvas({
       const stage = stageRef.current
       const rawPoint = toStagePoint(stage)
       if (!rawPoint) return
-      setRulerDraftCursor(stageToNorm(rawPoint, fittedBackgroundImage))
+      const rulerNormPoint = stageToNorm(rawPoint, fittedBackgroundImage)
+      const orthoShiftKey = e?.evt?.shiftKey ?? false
+      setRulerDraftCursor(applyOrthoSnap(rulerDraftStart, rulerNormPoint, fittedBackgroundImage, orthoShiftKey))
       return
     }
 
@@ -3203,7 +3684,8 @@ function CadCanvas({
 
     if (isAwaitingScaleLine) {
       if (scaleDraftStart) {
-        setScaleDraftCursor(normPoint)
+        const orthoShiftKey = e?.evt?.shiftKey ?? false
+        setScaleDraftCursor(applyOrthoSnap(scaleDraftStart, normPoint, fittedBackgroundImage, orthoShiftKey))
       }
       return
     }
@@ -3213,7 +3695,9 @@ function CadCanvas({
     }
 
     if (draftPolygonPoints.length > 0) {
-      setDraftPolygonCursor(normPoint)
+      const orthoShiftKey = e?.evt?.shiftKey ?? false
+      const lastPolygonPoint = draftPolygonPoints[draftPolygonPoints.length - 1]
+      setDraftPolygonCursor(applyOrthoSnap(lastPolygonPoint, normPoint, fittedBackgroundImage, orthoShiftKey))
     }
   }
 
@@ -3716,7 +4200,6 @@ function CadCanvas({
     }
 
     return result
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placedEquipments, automationBoards, avOrganizers, customBoards, placedCurtains, polygons, fittedBackgroundImage, equipLabelStage, zoom, equipmentFilters, scaleDefinition, loadedBackgroundImage])
   const polygonLabelPlacementById = useMemo(() => {
     const placements = {}
@@ -3995,15 +4478,17 @@ function CadCanvas({
               const rbW = Math.abs(endStage.x - startStage.x)
               const rbH = Math.abs(endStage.y - startStage.y)
               if (Math.hypot(rbW, rbH) < RUBBER_BAND_MIN_DRAG) return null
+              const isWindowSelection = endStage.x >= startStage.x
+              const rubberBandColor = isWindowSelection ? WINDOW_SELECTION_COLOR : CROSSING_SELECTION_COLOR
               return (
                 <Rect
                   x={Math.min(startStage.x, endStage.x)}
                   y={Math.min(startStage.y, endStage.y)}
                   width={rbW}
                   height={rbH}
-                  stroke={SELECTED_POLYGON_COLOR}
+                  stroke={rubberBandColor}
                   strokeWidth={1}
-                  fill={hexToRgba(SELECTED_POLYGON_COLOR, 0.08)}
+                  fill={hexToRgba(rubberBandColor, 0.08)}
                   dash={[4, 3]}
                   listening={false}
                 />
@@ -4388,7 +4873,6 @@ function CadCanvas({
                   }
                   onEquipmentLabelRenameCommit?.(equipment.id, event.currentTarget.value)
                 }}
-                // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
               />
             ) : (() => {
@@ -4422,6 +4906,18 @@ function CadCanvas({
                 {
                   x: normToStage(initial.point, fittedBackgroundImage).x + _boardPolyDrag.stageDelta.x,
                   y: normToStage(initial.point, fittedBackgroundImage).y + _boardPolyDrag.stageDelta.y,
+                },
+                fittedBackgroundImage,
+              )
+            }
+          }
+          if (draggingMulti) {
+            const looseBoard = draggingMulti.looseBoards?.find((b) => b.id === board.id)
+            if (looseBoard) {
+              return stageToNorm(
+                {
+                  x: normToStage(looseBoard.initialPoint, fittedBackgroundImage).x + draggingMulti.stageDelta.x,
+                  y: normToStage(looseBoard.initialPoint, fittedBackgroundImage).y + draggingMulti.stageDelta.y,
                 },
                 fittedBackgroundImage,
               )
@@ -4471,7 +4967,7 @@ function CadCanvas({
             <div
               key={board.id}
               data-board-id={board.id}
-              className={`cad-board-placement cad-board-placement--wireframe${selectedBoardId === board.id ? ' is-selected' : ''}${isDroppable ? ' is-drop-target' : ''}${isInvalidDrop ? ' is-invalid-target' : ''}`}
+              className={`cad-board-placement cad-board-placement--wireframe${selectedBoardId === board.id || multiSelectedBoardIds.has(board.id) ? ' is-selected' : ''}${isDroppable ? ' is-drop-target' : ''}${isInvalidDrop ? ' is-invalid-target' : ''}`}
               style={{ left: clampedCX, top: clampedCY, width: wfWidth, height: wfHeight }}
               onMouseDown={(event) => handleBoardMouseDown(event, board)}
               onContextMenu={(event) => openBoardContextMenu(event, board.id)}
@@ -4520,7 +5016,7 @@ function CadCanvas({
                       iconKey: itemData.iconKey,
                     },
                   })
-                } catch {}
+                } catch { /* payload de drag invalido, ignora */ }
               }}
             >
               <img
@@ -4548,7 +5044,6 @@ function CadCanvas({
                       if (Date.now() - boardRenameOpenedAtRef.current < 120) return
                       onBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
                     }}
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus
                   />
                 ) : (
@@ -4621,7 +5116,7 @@ function CadCanvas({
           <div
             key={board.id}
             data-board-id={board.id}
-            className={`cad-board-placement${selectedBoardId === board.id ? ' is-selected' : ''}`}
+            className={`cad-board-placement${selectedBoardId === board.id || multiSelectedBoardIds.has(board.id) ? ' is-selected' : ''}`}
             style={{ left: stagePoint.x, top: stagePoint.y }}
             onMouseDown={(event) => handleBoardMouseDown(event, board)}
             onContextMenu={(event) => openBoardContextMenu(event, board.id)}
@@ -4656,7 +5151,6 @@ function CadCanvas({
                   if (Date.now() - boardRenameOpenedAtRef.current < 120) return
                   onBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
                 }}
-                // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
               />
             ) : (
@@ -4710,7 +5204,7 @@ function CadCanvas({
                             iconKey: itemData.iconKey,
                           },
                         })
-                      } catch {}
+                      } catch { /* payload de drag invalido, ignora */ }
                     }}
                     onContextMenu={(event) => {
                       if (!slot) return
@@ -4722,6 +5216,7 @@ function CadCanvas({
                       const menuHeight = 36
                       const rawX = event.clientX - (bounds?.left ?? 0)
                       const rawY = event.clientY - (bounds?.top ?? 0)
+                      closeAllContextMenus()
                       setBoardSlotContextMenu({
                         boardId: board.id,
                         slotIndex,
@@ -4747,23 +5242,42 @@ function CadCanvas({
 
       {fittedBackgroundImage ? (avOrganizers ?? []).filter((org) => isEquipmentIconVisible(org, equipmentFilters)).map((org) => {
         const orgPolyDrag = getPolygonDragData(org.polygonId)
+        const looseOrgDrag = draggingMulti?.looseAvOrganizers?.find((o) => o.id === org.id) ?? null
         const visibleRectStart = (() => {
-          if (!orgPolyDrag) return org.rectStart
-          const initial = orgPolyDrag.initialAvOrganizerRects?.find((o) => o.id === org.id)
-          if (!initial) return org.rectStart
-          return stageToNorm({
-            x: normToStage(initial.rectStart, fittedBackgroundImage).x + orgPolyDrag.stageDelta.x,
-            y: normToStage(initial.rectStart, fittedBackgroundImage).y + orgPolyDrag.stageDelta.y,
-          }, fittedBackgroundImage)
+          if (orgPolyDrag) {
+            const initial = orgPolyDrag.initialAvOrganizerRects?.find((o) => o.id === org.id)
+            if (initial) {
+              return stageToNorm({
+                x: normToStage(initial.rectStart, fittedBackgroundImage).x + orgPolyDrag.stageDelta.x,
+                y: normToStage(initial.rectStart, fittedBackgroundImage).y + orgPolyDrag.stageDelta.y,
+              }, fittedBackgroundImage)
+            }
+          }
+          if (looseOrgDrag) {
+            return stageToNorm({
+              x: normToStage(looseOrgDrag.initialRectStart, fittedBackgroundImage).x + draggingMulti.stageDelta.x,
+              y: normToStage(looseOrgDrag.initialRectStart, fittedBackgroundImage).y + draggingMulti.stageDelta.y,
+            }, fittedBackgroundImage)
+          }
+          return org.rectStart
         })()
         const visibleRectEnd = (() => {
-          if (!orgPolyDrag) return org.rectEnd
-          const initial = orgPolyDrag.initialAvOrganizerRects?.find((o) => o.id === org.id)
-          if (!initial) return org.rectEnd
-          return stageToNorm({
-            x: normToStage(initial.rectEnd, fittedBackgroundImage).x + orgPolyDrag.stageDelta.x,
-            y: normToStage(initial.rectEnd, fittedBackgroundImage).y + orgPolyDrag.stageDelta.y,
-          }, fittedBackgroundImage)
+          if (orgPolyDrag) {
+            const initial = orgPolyDrag.initialAvOrganizerRects?.find((o) => o.id === org.id)
+            if (initial) {
+              return stageToNorm({
+                x: normToStage(initial.rectEnd, fittedBackgroundImage).x + orgPolyDrag.stageDelta.x,
+                y: normToStage(initial.rectEnd, fittedBackgroundImage).y + orgPolyDrag.stageDelta.y,
+              }, fittedBackgroundImage)
+            }
+          }
+          if (looseOrgDrag) {
+            return stageToNorm({
+              x: normToStage(looseOrgDrag.initialRectEnd, fittedBackgroundImage).x + draggingMulti.stageDelta.x,
+              y: normToStage(looseOrgDrag.initialRectEnd, fittedBackgroundImage).y + draggingMulti.stageDelta.y,
+            }, fittedBackgroundImage)
+          }
+          return org.rectEnd
         })()
 
         const isResizingThis = resizingAvOrganizer?.id === org.id
@@ -4806,7 +5320,7 @@ function CadCanvas({
           <div
             key={org.id}
             data-av-org-id={org.id}
-            className={`cad-av-organizer-rect${selectedAvOrganizerId === org.id ? ' is-selected' : ''}${dragOverAvOrganizer?.id === org.id && dragOverAvOrganizer?.isValid ? ' is-drop-target' : ''}${dragOverAvOrganizer?.id === org.id && dragOverAvOrganizer?.isValid === false ? ' is-invalid-target' : ''}`}
+            className={`cad-av-organizer-rect${selectedAvOrganizerId === org.id || multiSelectedAvOrganizerIds.has(org.id) ? ' is-selected' : ''}${dragOverAvOrganizer?.id === org.id && dragOverAvOrganizer?.isValid ? ' is-drop-target' : ''}${dragOverAvOrganizer?.id === org.id && dragOverAvOrganizer?.isValid === false ? ' is-invalid-target' : ''}`}
             style={{ left, top, width, height }}
             onMouseDown={(event) => handleAvOrganizerMouseDown(event, org)}
             onContextMenu={(event) => openAvOrganizerContextMenu(event, org.id)}
@@ -4856,7 +5370,7 @@ function CadCanvas({
                     iconKey: itemData.iconKey,
                   },
                 })
-              } catch {}
+              } catch { /* payload de drag invalido, ignora */ }
             }}
           >
             <div className="cad-av-organizer-rect__center" style={{ left: width / 2, top: height / 2 }} />
@@ -4883,7 +5397,6 @@ function CadCanvas({
                       if (Date.now() - avOrganizerRenameOpenedAtRef.current < 120) return
                       onAvOrganizerLabelRenameCommit?.(org.id, event.currentTarget.value)
                     }}
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus
                   />
                 ) : (
@@ -4978,23 +5491,42 @@ function CadCanvas({
 
       {fittedBackgroundImage ? (customBoards ?? []).filter((board) => isEquipmentIconVisible(board, equipmentFilters)).map((board) => {
         const cbPolyDrag = getPolygonDragData(board.polygonId)
+        const looseCbDrag = draggingMulti?.looseCustomBoards?.find((b) => b.id === board.id) ?? null
         const visibleRectStart = (() => {
-          if (!cbPolyDrag) return board.rectStart
-          const initial = cbPolyDrag.initialCustomBoardRects?.find((b) => b.id === board.id)
-          if (!initial) return board.rectStart
-          return stageToNorm({
-            x: normToStage(initial.rectStart, fittedBackgroundImage).x + cbPolyDrag.stageDelta.x,
-            y: normToStage(initial.rectStart, fittedBackgroundImage).y + cbPolyDrag.stageDelta.y,
-          }, fittedBackgroundImage)
+          if (cbPolyDrag) {
+            const initial = cbPolyDrag.initialCustomBoardRects?.find((b) => b.id === board.id)
+            if (initial) {
+              return stageToNorm({
+                x: normToStage(initial.rectStart, fittedBackgroundImage).x + cbPolyDrag.stageDelta.x,
+                y: normToStage(initial.rectStart, fittedBackgroundImage).y + cbPolyDrag.stageDelta.y,
+              }, fittedBackgroundImage)
+            }
+          }
+          if (looseCbDrag) {
+            return stageToNorm({
+              x: normToStage(looseCbDrag.initialRectStart, fittedBackgroundImage).x + draggingMulti.stageDelta.x,
+              y: normToStage(looseCbDrag.initialRectStart, fittedBackgroundImage).y + draggingMulti.stageDelta.y,
+            }, fittedBackgroundImage)
+          }
+          return board.rectStart
         })()
         const visibleRectEnd = (() => {
-          if (!cbPolyDrag) return board.rectEnd
-          const initial = cbPolyDrag.initialCustomBoardRects?.find((b) => b.id === board.id)
-          if (!initial) return board.rectEnd
-          return stageToNorm({
-            x: normToStage(initial.rectEnd, fittedBackgroundImage).x + cbPolyDrag.stageDelta.x,
-            y: normToStage(initial.rectEnd, fittedBackgroundImage).y + cbPolyDrag.stageDelta.y,
-          }, fittedBackgroundImage)
+          if (cbPolyDrag) {
+            const initial = cbPolyDrag.initialCustomBoardRects?.find((b) => b.id === board.id)
+            if (initial) {
+              return stageToNorm({
+                x: normToStage(initial.rectEnd, fittedBackgroundImage).x + cbPolyDrag.stageDelta.x,
+                y: normToStage(initial.rectEnd, fittedBackgroundImage).y + cbPolyDrag.stageDelta.y,
+              }, fittedBackgroundImage)
+            }
+          }
+          if (looseCbDrag) {
+            return stageToNorm({
+              x: normToStage(looseCbDrag.initialRectEnd, fittedBackgroundImage).x + draggingMulti.stageDelta.x,
+              y: normToStage(looseCbDrag.initialRectEnd, fittedBackgroundImage).y + draggingMulti.stageDelta.y,
+            }, fittedBackgroundImage)
+          }
+          return board.rectEnd
         })()
 
         const isResizingThis = resizingCustomBoard?.id === board.id
@@ -5037,7 +5569,7 @@ function CadCanvas({
           <div
             key={board.id}
             data-custom-board-id={board.id}
-            className={`cad-custom-board-rect${selectedCustomBoardId === board.id ? ' is-selected' : ''}${dragOverCustomBoard?.id === board.id && dragOverCustomBoard?.isValid ? ' is-drop-target' : ''}${dragOverCustomBoard?.id === board.id && dragOverCustomBoard?.isValid === false ? ' is-invalid-target' : ''}`}
+            className={`cad-custom-board-rect${selectedCustomBoardId === board.id || multiSelectedCustomBoardIds.has(board.id) ? ' is-selected' : ''}${dragOverCustomBoard?.id === board.id && dragOverCustomBoard?.isValid ? ' is-drop-target' : ''}${dragOverCustomBoard?.id === board.id && dragOverCustomBoard?.isValid === false ? ' is-invalid-target' : ''}`}
             style={{ left, top, width, height }}
             onMouseDown={(event) => handleCustomBoardMouseDown(event, board)}
             onContextMenu={(event) => openCustomBoardContextMenu(event, board.id)}
@@ -5087,7 +5619,7 @@ function CadCanvas({
                     iconKey: itemData.iconKey,
                   },
                 })
-              } catch {}
+              } catch { /* payload de drag invalido, ignora */ }
             }}
           >
             <div className="cad-custom-board-rect__center" style={{ left: width / 2, top: height / 2 }} />
@@ -5114,7 +5646,6 @@ function CadCanvas({
                       if (Date.now() - customBoardRenameOpenedAtRef.current < 120) return
                       onCustomBoardLabelRenameCommit?.(board.id, event.currentTarget.value)
                     }}
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus
                   />
                 ) : (
@@ -5214,6 +5745,8 @@ function CadCanvas({
         let rectStart = curtain.rectStart
         let rectEnd = curtain.rectEnd
 
+        const looseCurtainDrag = draggingMulti?.looseCurtains?.find((c) => c.id === curtain.id) ?? null
+
         if (isDragging && draggingCurtain.currentStart) {
           rectStart = draggingCurtain.currentStart
           rectEnd = draggingCurtain.currentEnd
@@ -5230,6 +5763,16 @@ function CadCanvas({
               fittedBackgroundImage,
             )
           }
+        } else if (looseCurtainDrag) {
+          const delta = draggingMulti.stageDelta
+          rectStart = stageToNorm(
+            { x: normToStage(looseCurtainDrag.initialRectStart, fittedBackgroundImage).x + delta.x, y: normToStage(looseCurtainDrag.initialRectStart, fittedBackgroundImage).y + delta.y },
+            fittedBackgroundImage,
+          )
+          rectEnd = stageToNorm(
+            { x: normToStage(looseCurtainDrag.initialRectEnd, fittedBackgroundImage).x + delta.x, y: normToStage(looseCurtainDrag.initialRectEnd, fittedBackgroundImage).y + delta.y },
+            fittedBackgroundImage,
+          )
         }
 
         const ss = normToStage(rectStart, fittedBackgroundImage)
@@ -5261,12 +5804,45 @@ function CadCanvas({
         return (
           <div
             key={curtain.id}
-            className={`cad-curtain-placement${selectedCurtainId === curtain.id ? ' is-selected' : ''}${isResizing ? ' is-resizing' : ''}`}
+            className={`cad-curtain-placement${selectedCurtainId === curtain.id || multiSelectedCurtainIds.has(curtain.id) ? ' is-selected' : ''}${isResizing ? ' is-resizing' : ''}`}
             style={{ left: dss.x, top: dss.y, width: dw, height: dh }}
             onMouseDown={(event) => {
               if (activeTool !== 'select') return
               if (isResizing) return
               event.stopPropagation()
+
+              // Shift+click: toggle curtain in multi-selection
+              if (event.shiftKey) {
+                setMultiSelectedCurtainIds((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(curtain.id)) next.delete(curtain.id)
+                  else next.add(curtain.id)
+                  return next
+                })
+                return
+              }
+
+              // Multi-drag: clicked curtain is part of an active multi-selection
+              if (multiSelectedCurtainIds.has(curtain.id)) {
+                const container = containerRef.current
+                if (!container) return
+                const rect = container.getBoundingClientRect()
+                const stagePoint = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+                curtainHoldTimerRef.current = window.setTimeout(() => {
+                  curtainHoldTimerRef.current = null
+                  setDraggingMulti(buildMultiDragState(stagePoint))
+                }, 180)
+                return
+              }
+
+              // Regular click: clear other multi-selections, proceed with single select
+              setMultiSelectedPolygonIds(new Set())
+              setMultiSelectedEquipmentIds(new Set())
+              setMultiSelectedBoardIds(new Set())
+              setMultiSelectedCustomBoardIds(new Set())
+              setMultiSelectedAvOrganizerIds(new Set())
+              setMultiSelectedCurtainIds(new Set())
+
               onCurtainSelect?.(curtain.id)
               const container = containerRef.current
               if (!container) return
@@ -5318,7 +5894,6 @@ function CadCanvas({
                       if (Date.now() - curtainRenameOpenedAtRef.current < 120) return
                       onCurtainLabelRenameCommit?.(curtain.id, event.currentTarget.value)
                     }}
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus
                   />
                 ) : (
@@ -5410,7 +5985,6 @@ function CadCanvas({
               }
               onLabelRenameCommit?.(renamingPolygonId, event.currentTarget.value)
             }}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
           />
         )
@@ -5486,6 +6060,7 @@ function CadCanvas({
               onEquipmentSelect?.(null)
               onPolygonContextMenu?.(polygon.id)
               onLabelClick?.(polygon.id)
+              closeAllContextMenus()
               setPolygonContextMenu({
                 polygonId: polygon.id,
                 x: Math.max(4, x),
@@ -5653,18 +6228,6 @@ function CadCanvas({
           >
             <span className="cad-tree-context-menu__label">Renomear</span>
           </button>
-          {boardContextMenu.isDynamic ? (
-            <button
-              type="button"
-              className="cad-tree-context-menu__item"
-              onClick={() => {
-                onBoardEdit?.(boardContextMenu.boardId)
-                setBoardContextMenu(null)
-              }}
-            >
-              <span className="cad-tree-context-menu__label">Propriedades</span>
-            </button>
-          ) : null}
           <button
             type="button"
             className="cad-tree-context-menu__item cad-tree-context-menu__item--danger"

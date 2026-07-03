@@ -1015,4 +1015,71 @@ Como o cálculo passou a acontecer **localmente** (onde o histórico completo do
 
 ---
 
-*Relatório atualizado em Junho de 2026 — v1.0.24*
+### v1.0.26 — Ortho Mode, Window/Crossing Selection e Alinhamento por Wireframe (Julho de 2026)
+
+Esta versão introduz duas ferramentas de precisão para o desenho no canvas — Modo Ortho e Window/Crossing Selection — e reformula o Alinhar/Distribuir para considerar o tamanho real dos equipamentos.
+
+#### 14.1 Modo Ortho (Shift + 15°)
+
+Enquanto as ferramentas **Polígono**, **Régua** ou **Definição de Escala** estão ativas, segurar **Shift** ao posicionar o próximo ponto restringe a direção da linha (do último ponto colocado até o cursor) ao múltiplo de 15° mais próximo, medido a partir da horizontal absoluta da tela.
+
+| Ferramenta | Escopo do snap |
+|---|---|
+| Polígono | Todos os segmentos, não só o primeiro — sempre relativo ao último ponto colocado |
+| Régua | Segmento único, entre o clique inicial e o cursor |
+| Definição de Escala | Segmento único, entre o clique inicial e o cursor |
+
+O cálculo (`snapPointToOrthoAngle`/`applyOrthoSnap`, `CadCanvas.jsx`) é feito em coordenadas de **stage** (pixels), convertendo de/para normalizado via `normToStage`/`stageToNorm` — necessário porque a planta importada pode ter proporção diferente de 1:1, o que distorceria o ângulo se o cálculo fosse feito em coordenadas normalizadas. A mesma função é usada tanto no preview (`mousemove`) quanto no clique que registra o ponto (`mousedown`), então o clique final sempre bate exatamente com a prévia tracejada.
+
+#### 14.2 Window/Crossing Selection
+
+Novo comportamento para o retângulo de seleção por arraste (rubber band), inspirado no padrão AutoCAD:
+
+| Direção do arraste | Nome | Cor | Seleciona |
+|---|---|---|---|
+| Esquerda → Direita | Window | Azul (`#0095ff`) | Apenas objetos **totalmente contidos** no retângulo |
+| Direita → Esquerda | Crossing | Verde (`#2ecc71`) | Objetos **contidos ou tocados** (interseção) pelo retângulo |
+
+A cor do retângulo tracejado já reflete o modo atual em tempo real, antes mesmo de soltar o mouse (recalculado a cada `mousemove` comparando `endStage.x` com `startStage.x`).
+
+A regra se aplica aos **seis** tipos de entidade que agora participam de seleção múltipla: Polígonos, Equipamentos avulsos, Quadros de Automação fixos, Quadro Custom, Organizador AV e Cortinas — os quatro últimos ganharam participação completa no sistema de seleção múltipla nesta versão (antes só Polígonos e Equipamentos eram selecionáveis via rubber band):
+
+- **Rubber band**: todos os seis tipos testados contra o retângulo (bounding box real para os retangulares; ponto para equipamentos avulsos; bbox aproximada a partir do wireframe para Quadros de Automação, que são âncorados em ponto mas renderizam em tamanho real)
+- **Shift+click**: alterna qualquer um dos seis tipos dentro/fora da seleção múltipla
+- **Exclusão em lote**: `Delete` remove todos os tipos selecionados de uma vez, com mensagem de confirmação com gênero/singular-plural corretos por categoria
+- **Arraste em conjunto**: segurar e arrastar qualquer item da seleção múltipla move todos os outros tipos junto (via `draggingMulti.loose<Tipo>s`)
+
+#### 14.3 Alinhamento e Distribuição por Wireframe
+
+Os botões de Alinhar/Distribuir da toolbar passam a operar sobre os **seis** tipos selecionáveis diretamente (antes só reconheciam `multiSelectedPolygonIds` + `multiSelectedEquipmentIds` — selecionar Boards/Organizador AV/Quadro Custom/Cortinas sozinhos e clicar em Alinhar não tinha efeito nenhum).
+
+Além disso, o cálculo de posição passou a considerar o **tamanho real do wireframe** de cada item, não apenas seu ponto de ancoragem:
+
+| Aspecto | Antes | Depois |
+|---|---|---|
+| Referência para equipamentos/boards | Ponto de ancoragem (tamanho zero) | Centro do wireframe real ± metade da largura/altura (`EQUIPMENT_WIREFRAMES`), quando escala e wireframe existem |
+| Equipamentos com `wallNormal` (parede) | Ponto na parede | Centro renderizado do wireframe (já deslocado para fora da parede) |
+| Espaço de cálculo | Coordenadas normalizadas | Coordenadas de stage (pixels), convertidas via `normToStage`/`stageToNorm` — correto mesmo com a planta rotacionada |
+| Seleção direta de Boards/Organizador AV/Quadro Custom/Cortinas | Ignorados pelo Alinhar/Distribuir | Tratados como itens "soltos" e movidos individualmente |
+| Canal de commit | `onPolygonTranslated` por polígono + `onEquipmentPointsUpdate` separado | Um único `onMultiTranslated(...)` — mesmo canal do arraste de seleção múltipla |
+| Passos no histórico (undo) | Um passo por polígono movido | Um único passo para todo o Align/Distribute |
+
+Exemplo prático: alinhar à esquerda um Quadro AC-QA6M (500×110mm) e um sensor de teto (60×60mm) agora encosta as **bordas esquerdas** dos dois desenhos técnicos — não mais os pontos de ancoragem, que resultariam em posições visivelmente descoladas dado o tamanho bem diferente dos dois equipamentos.
+
+#### 14.4 Correção de Erros e Bugs
+
+Diversas correções de bugs e inconsistências identificadas em uma varredura completa do código — envolvendo seleção, exclusão em lote, importação de planta, menus de contexto, validação de formulários e limpeza de código morto, entre outras.
+
+#### 14.5 Arquivos Modificados
+
+| Arquivo | Mudanças |
+|---|---|
+| `src/App.jsx` | Diversos handlers de seleção/exclusão/renomeação ajustados; `handleMultiDeleteRequest`/`handleMultiTranslated` estendidos para os 6 tipos; novos batch-updaters (`handleBoardPointsUpdate`, `handleAvOrganizerRectsUpdate`, `handleCustomBoardRectsUpdate`, `handleCurtainRectsUpdate`); `handleImportImage` com reset mais completo |
+| `src/components/CadCanvas.jsx` | `snapPointToOrthoAngle`/`applyOrthoSnap` (Modo Ortho); rubber band com Window/Crossing e cor dinâmica; `multiSelectedBoardIds`/`multiSelectedCustomBoardIds`/`multiSelectedAvOrganizerIds`/`multiSelectedCurtainIds`; `buildMultiDragState` estendido; reescrita completa do `useEffect` de Alinhar/Distribuir (`pointItemStageBounds`, `rectItemStageBounds`, `polygonStageBounds`, `buildPolygonTranslation`) |
+| `src/components/ScaleValueOverlay.jsx` | Validação do botão "Concluir" corrigida |
+| `src/components/TopToolbar.jsx` | Zoom/Transparência commitam corretamente no blur |
+| `src/components/ProjectTree.jsx`, `AddMultipleItemsOverlay.jsx`, `AutomationBoardOverlay.jsx`, `AvOrganizerOverlay.jsx` | Limpeza de código morto e comentários de lint órfãos |
+
+---
+
+*Relatório atualizado em Julho de 2026 — v1.0.26*

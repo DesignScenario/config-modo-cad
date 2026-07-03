@@ -495,6 +495,15 @@ As ferramentas de forma (`SHAPE_DRAW_TOOLS = new Set(['rectangle', 'elipse', 'tr
 
 **Importante — espaço de coordenadas para Shift**: `computeShapeBox` é executado em coordenadas de stage (pixels), não normalizadas, pois a imagem pode ter proporção diferente de 1:1 e distorceria o cálculo do quadrado/equilátero. O resultado é convertido de volta para coords normalizadas com `stageToNorm`.
 
+### Modo Ortho (Shift + 15°)
+
+Com as ferramentas **Polígono**, **Régua** ou **Definição de Escala** ativas, segurar **Shift** enquanto posiciona o próximo ponto restringe a direção da linha (do último ponto já colocado até o cursor) ao múltiplo de 15° mais próximo, medido a partir da horizontal absoluta — soltar o Shift volta ao posicionamento livre.
+
+- **Polígono**: o snap vale em **todos os segmentos**, não só o primeiro — sempre relativo ao último ponto colocado, mesmo que esse ponto já tenha sido resultado de um snap anterior.
+- **Régua** e **Definição de Escala**: têm um único segmento; o snap se aplica entre o primeiro clique e o cursor.
+- `snapPointToOrthoAngle`/`applyOrthoSnap` (`CadCanvas.jsx`) fazem o cálculo em coordenadas de **stage**, convertendo de/para normalizado via `normToStage`/`stageToNorm` — mesmo motivo do Shift nas ferramentas de forma (proporção da imagem).
+- A mesma função de snap é usada tanto no preview (`mousemove`, linha tracejada) quanto no clique que efetivamente registra o ponto (`mousedown`), garantindo que o clique sempre acerte exatamente onde a prévia mostrou.
+
 ### Seleção múltipla (ferramenta `select`)
 
 Estado local em `CadCanvas.jsx` (não em `App.jsx`):
@@ -504,38 +513,50 @@ const [rubberBand, setRubberBand] = useState(null)
 
 const [multiSelectedPolygonIds, setMultiSelectedPolygonIds] = useState(new Set())
 const [multiSelectedEquipmentIds, setMultiSelectedEquipmentIds] = useState(new Set())
+const [multiSelectedBoardIds, setMultiSelectedBoardIds] = useState(new Set())
+const [multiSelectedCustomBoardIds, setMultiSelectedCustomBoardIds] = useState(new Set())
+const [multiSelectedAvOrganizerIds, setMultiSelectedAvOrganizerIds] = useState(new Set())
+const [multiSelectedCurtainIds, setMultiSelectedCurtainIds] = useState(new Set())
 ```
 
-**Rubber band (arrastar para selecionar):**
-- Arrastar no Stage com a ferramenta `select` ativa inicia o rubber band — só quando `fittedBackgroundImage` está definida (sem imagem importada, rubber band não é criado)
+Seis tipos de entidade participam da seleção múltipla (rubber band, shift+click, exclusão em lote e arraste em conjunto): **polígonos**, **equipamentos avulsos**, **Quadros de Automação fixos** (`automationBoards`), **Quadro Custom** (`customBoards`), **Organizador AV** (`avOrganizers`) e **Cortinas** (`placedCurtains`).
+
+**Rubber band (arrastar para selecionar) — Window / Crossing Selection:**
+- Arrastar no Stage com a ferramenta `select` ativa inicia o rubber band — só quando `fittedBackgroundImage` está definida (sem imagem importada, rubber band não é criado). Como polígonos com preenchimento capturam o mousedown, o ponto inicial do arraste precisa estar em área vazia do canvas (fora de qualquer polígono) para o rubber band iniciar — arrastar a partir de dentro de um polígono é tratado como clique/drag do próprio polígono.
 - O `<Rect>` Konva tracejado só é renderizado quando a distância de arraste ≥ `RUBBER_BAND_MIN_DRAG = 4 px` — cliques simples não exibem o retângulo
-- Durante o arraste, `rubberBand.endStage` é atualizado em `handleStageMouseMove` (cor `SELECTED_POLYGON_COLOR`, fill com 8% de opacidade)
-- Ao soltar o mouse (`window.addEventListener('mouseup')`): calcula AABB do rubber band em coords normalizadas, testa interseção com cada polígono (`getPolygonBounds`) e cada equipamento (ponto dentro do rect); o resultado substitui `multiSelectedPolygonIds`/`multiSelectedEquipmentIds`
+- A direção horizontal do arraste (`endStage.x >= startStage.x`) determina o modo, recalculado em tempo real a cada `handleStageMouseMove` — a cor do retângulo já reflete o modo atual antes de soltar o mouse:
+  - **Esquerda → Direita = Window** (`WINDOW_SELECTION_COLOR`, `#0095ff` azul) — seleciona apenas objetos **totalmente contidos** no retângulo
+  - **Direita → Esquerda = Crossing** (`CROSSING_SELECTION_COLOR`, `#2ecc71` verde) — seleciona objetos **contidos ou tocados** (interseção) pelo retângulo
+  - `endStage.x === startStage.x` (arraste puramente vertical) cai no modo Window
+- Ao soltar o mouse (`window.addEventListener('mouseup')`): calcula AABB do rubber band em coords de stage e aplica o teste conforme o modo, via helper comum `matchesRubberBand(bounds)`:
+  - **Polígonos, Organizador AV, Quadro Custom e Cortinas**: bounding box real (`getPolygonBounds` para polígonos; `rectStart`/`rectEnd` convertidos para stage para os demais) — Window exige bounding box inteiro dentro do rubber band; Crossing usa `rectsIntersect` (interseção de bounding boxes)
+  - **Equipamentos avulsos**: teste é sempre "ponto dentro do rect" — como um equipamento avulso é um ponto sem extensão, Window e Crossing são equivalentes para esse tipo
+  - **Quadros de Automação fixos**: também point-based no estado (`point: {x,y}`), mas renderizam como wireframe em tamanho real — a bounding box usada no teste é aproximada centrando `point` e aplicando `widthMm`/`heightMm` de `EQUIPMENT_WIREFRAMES[board.catalogItemId]` convertidos para pixels de stage (mesma fórmula do render, sem o clamp de polígono aplicado no desenho — diferença irrelevante na prática já que o board raramente fica encostado na borda)
+  - O resultado substitui todos os seis `multiSelected*Ids`
 
-**Shift+click:**
-- `handlePolygonMouseDown` com `event.evt.shiftKey`: faz toggle do `polygonId` em `multiSelectedPolygonIds`
-- `handleEquipmentMouseDown` (HTML overlays) com `event.shiftKey`: faz toggle do `equipment.id` em `multiSelectedEquipmentIds`
+**Shift+click:** cada handler de mousedown por tipo (`handlePolygonMouseDown`, `handleEquipmentMouseDown`, `handleBoardMouseDown`, `handleAvOrganizerMouseDown`, `handleCustomBoardMouseDown`, e o `onMouseDown` inline da Cortina) checa `shiftKey` (via `event.evt.shiftKey` nos handlers Konva, `event.shiftKey` nos handlers DOM nativos dos quatro últimos tipos) e faz toggle do próprio id no respectivo `multiSelected*Ids`. Um clique normal (sem Shift) limpa os **seis** sets antes de prosseguir com a seleção única.
 
-**Rendering:**
-- Polígono selecionado: `polygon.id === selectedPolygonId || multiSelectedPolygonIds.has(polygon.id)`
-- Equipamento selecionado: `selectedEquipmentId === equipment.id || multiSelectedEquipmentIds.has(equipment.id)`
+**Rendering — `isSelected` em cada tipo:**
+- Polígono: `polygon.id === selectedPolygonId || multiSelectedPolygonIds.has(polygon.id)`
+- Equipamento: `selectedEquipmentId === equipment.id || multiSelectedEquipmentIds.has(equipment.id)`
+- Board / Custom Board / Organizador AV / Cortina: mesmo padrão, `OR`-ando `selected<Tipo>Id === id` com `multiSelected<Tipo>Ids.has(id)` na className (`is-selected`)
 - A seleção múltipla é zerada ao mudar de ferramenta ou ao clicar em área vazia sem Shift
 
+**Arrastar seleção múltipla (ver também "Arrastar Seleção Múltipla" abaixo):** ao segurar e arrastar qualquer item que já esteja na seleção múltipla (após o hold-timer de `EQUIPMENT_HOLD_TO_DRAG_MS`/180ms para os tipos que já usam esse padrão), `buildMultiDragState` monta `loose<Tipo>s` para os itens do tipo cujo `polygonId` **não** está em `multiSelectedPolygonIds` — itens cujo polígono pai também está selecionado continuam movendo via `initialBoardPoints`/`initialAvOrganizerRects`/`initialCustomBoardRects`/`initialCurtainRects` dentro de `draggingMulti.polygons` (mesmo caminho do drag de polígono). No commit (`pointerup`), `onMultiTranslated` inclui `looseBoardUpdates`/`looseCustomBoardUpdates`/`looseAvOrganizerUpdates`/`looseCurtainUpdates` além de `looseEquipmentUpdates`.
+
 **Exclusão em lote (tecla `Delete` ou botão da toolbar):**
-- Quando há multi-seleção ativa, `Delete` (ou o botão "Excluir" via `deleteRequest`) dispara `onMultiDeleteRequest([...polygonIds], [...equipmentIds])` em vez da exclusão individual
-- CadCanvas limpa imediatamente `multiSelectedPolygonIds` e `multiSelectedEquipmentIds` após disparar o request
-- App.jsx armazena em `pendingMultiDelete` e exibe `DeleteEnvironmentConfirmOverlay` com mensagem contextual:
-  - Só equipamentos: "Deseja realmente apagar os N equipamentos selecionados?"
-  - Só ambientes: "Deseja realmente apagar os N ambientes selecionados?"
-  - Misto: "Deseja realmente apagar os N itens selecionados?"
-- Ao confirmar (`handleConfirmMultiDelete`): itera sobre `polygonIds` chamando `handlePolygonDeleted` e sobre `equipmentIds` chamando `handleDeleteEquipment`; seta `multiDeletePolygonIds` para CadCanvas remover os shapes Konva
+- Quando há multi-seleção ativa em qualquer um dos seis sets, `Delete` (ou o botão "Excluir" via `deleteRequest`) dispara `onMultiDeleteRequest({ polygonIds, equipmentIds, boardIds, customBoardIds, avOrganizerIds, curtainIds })` (payload como objeto, não posicional) em vez da exclusão individual
+- CadCanvas limpa imediatamente os seis `multiSelected*Ids` após disparar o request
+- App.jsx armazena em `pendingMultiDelete` e exibe `DeleteEnvironmentConfirmOverlay` com mensagem contextual construída a partir de uma lista de categorias (`{ ids, singular, plural, gender }`, `gender: 'f'` só para cortina): mais de uma categoria não-vazia → "Deseja realmente apagar os N itens selecionados?"; uma categoria com 1 item → singular com artigo/gênero corretos; uma categoria com N itens → plural com artigo/gênero corretos
+- Ao confirmar (`handleConfirmMultiDelete`): itera cada array chamando o handler de exclusão individual correspondente (`handlePolygonDeleted`, `handleDeleteEquipment`, `handleDeleteBoard`, `handleDeleteCustomBoard`, `handleDeleteAvOrganizer`, `handleDeleteCurtain`); seta `multiDeletePolygonIds` para CadCanvas remover os shapes Konva dos polígonos excluídos
 - CadCanvas tem `useEffect` para `deletePolygonIds` (array) que filtra todos os polígonos de uma vez (análogo ao `deletePolygonId` singular)
+- `triggerDelete` também ganhou os ramos de exclusão por `Delete` para **seleção única** de Board/Custom Board/Organizador AV (a Cortina já tinha; Board/Custom Board/Organizador AV não respondiam à tecla Delete antes desta correção)
 
 **Observação:** o estado de seleção única em `App.jsx` (`selectedEquipmentId`, `selectedEnvironmentId`, etc.) não é alterado pela seleção múltipla — continua controlando rename/delete/properties de item único.
 
 ### Alinhamento e distribuição de itens selecionados
 
-Os botões de alinhamento/distribuição da toolbar operam sobre a seleção múltipla ativa (`multiSelectedPolygonIds` + `multiSelectedEquipmentIds`). São 8 botões no total, em ordem:
+Os botões de alinhamento/distribuição da toolbar operam sobre a seleção múltipla ativa, nos **seis** tipos selecionáveis (`multiSelectedPolygonIds`, `multiSelectedEquipmentIds`, `multiSelectedBoardIds`, `multiSelectedCustomBoardIds`, `multiSelectedAvOrganizerIds`, `multiSelectedCurtainIds`). São 8 botões no total, em ordem:
 
 | Botão | direction | Posição na toolbar |
 |---|---|---|
@@ -553,13 +574,21 @@ Os botões de alinhamento/distribuição da toolbar operam sobre a seleção mú
 2. App.jsx incrementa `alignTokenRef.current` e define `alignRequest = { direction, token }` (token garante que cliques repetidos na mesma direção re-disparam o efeito)
 3. CadCanvas tem `useEffect` que observa **apenas** `[alignRequest]` (com `eslint-disable-next-line react-hooks/exhaustive-deps`) e executa a operação; chama `onAlignConsumed()` ao final para zerar o request
 
-**Referência de alinhamento (coords normalizadas):**
-- `left`: `min(todos os minX)` — alinha borda esquerda ao item mais à esquerda
-- `right`: `max(todos os maxX)` — alinha borda direita ao item mais à direita
-- `top`: `min(todos os minY)` — alinha borda superior ao item mais acima
-- `bottom`: `max(todos os maxY)` — alinha borda inferior ao item mais abaixo
-- `center-x`: `(min(minX) + max(maxX)) / 2` — centraliza horizontalmente no meio do conjunto
-- `center-y`: `(min(minY) + max(maxY)) / 2` — centraliza verticalmente no meio do conjunto
+**Cálculo em coordenadas de stage (pixels), não normalizadas:** todo bounding box é convertido para stage via `normToStage` antes de medir/comparar, e o resultado final é convertido de volta com `stageToNorm` (nunca soma um delta bruto em coordenadas normalizadas) — assim o cálculo continua correto mesmo com a planta rotacionada.
+
+**Bounding box considera o tamanho real do wireframe, não só o ponto de ancoragem:**
+- **Equipamentos avulsos e Quadros de Automação** (`pointItemStageBounds` em `CadCanvas.jsx`): quando o `catalogItemId` tem entrada em `EQUIPMENT_WIREFRAMES` e a escala está definida, os limites usados são o **centro do wireframe ± metade da largura/altura real** convertida para pixels de stage — não mais o ponto de ancoragem isolado. Sem wireframe ou sem escala definida, cai de volta para um ponto de tamanho zero.
+- **Equipamentos com `wallNormal`** (pulsadores/teclados encostados na parede): o centro usado é o centro **renderizado** do wireframe — já deslocado para fora da parede, mesmo cálculo do render — então a borda alinhada é a borda visível do desenho, não o ponto de ancoragem na parede. O delta calculado a partir desse centro ainda é aplicado sobre o ponto de ancoragem bruto (`item.point`), já que o offset é constante sob translação.
+- **Organizador AV / Quadro Custom / Cortina** (`rectItemStageBounds`): bounding box a partir de `rectStart`/`rectEnd` convertidos para stage — sem mudança de comportamento, já eram tratados como retângulo.
+- **Polígono** (`polygonStageBounds`): `getPolygonBounds` sobre os pontos do polígono já convertidos para stage.
+
+**Referência de alinhamento:**
+- `left`: `min(todos os x1)` — alinha borda esquerda ao item mais à esquerda
+- `right`: `max(todos os x2)` — alinha borda direita ao item mais à direita
+- `top`: `min(todos os y1)` — alinha borda superior ao item mais acima
+- `bottom`: `max(todos os y2)` — alinha borda inferior ao item mais abaixo
+- `center-x`: `(min(x1) + max(x2)) / 2` — centraliza horizontalmente no meio do conjunto
+- `center-y`: `(min(y1) + max(y2)) / 2` — centraliza verticalmente no meio do conjunto
 
 **Distribuição (`distribute-x` / `distribute-y`):**
 - Requer 3+ itens selecionados; com menos, não faz nada
@@ -567,15 +596,13 @@ Os botões de alinhamento/distribuição da toolbar operam sobre a seleção mú
   ```
   gap = (leading_extremo_dir - trailing_extremo_esq - soma_tamanhos_do_meio) / (n - 1)
   ```
-- Para **polígonos**: tamanho = largura (`distribute-x`) ou altura (`distribute-y`) do bounding box
-- Para **equipamentos** (ponto sem dimensão): `tamanho = 0` → espaçamento igual entre os pontos
+- Tamanho de cada item = largura (`distribute-x`) ou altura (`distribute-y`) do seu bounding box em stage-pixels (ver acima) — para um equipamento sem wireframe, isso equivale a `tamanho = 0` (espaçamento igual entre os pontos), igual antes
 
 **Por tipo de item:**
-- **Polígono**: usa `getPolygonBounds(polygon.points)` para o bounding box; todos os vértices são traduzidos por `(dx, dy)`; `onPolygonTranslated` é chamado para persistir equipamentos, quadros e organizadores AV contidos no polígono
-- **Equipamento avulso** (não pertence a polígono selecionado): ponto alinhado/redistribuído via `onEquipmentPointsUpdate`
-- **Equipamento dentro de polígono selecionado**: ignorado — move com o polígono automaticamente
+- **Polígono selecionado**: todo equipamento/board/organizador AV/quadro custom/cortina que pertence a ele (mesmo `polygonId`) move junto como passageiro, via `buildPolygonTranslation(polygonId, dxStage, dyStage)` — a mesma função monta o payload completo (`newPolygonPoints`, `equipmentPoints`, `boardPoints`, `avOrganizerRects`, `customBoardRects`, `curtainRects`).
+- **Item de qualquer um dos outros 5 tipos selecionado diretamente** (não pertence a um polígono também selecionado): tratado como "solto" (loose) e movido individualmente.
 
-`onEquipmentPointsUpdate(updates)` em `App.jsx` faz um `setPlacedEquipments` direto sem alterar o `polygonId` ou a árvore.
+**Canal de commit único:** Align e Distribute emitem um único `onMultiTranslated({ polygonTranslations, looseEquipmentUpdates, looseBoardUpdates, looseAvOrganizerUpdates, looseCustomBoardUpdates, looseCurtainUpdates })` — o mesmo canal usado pelo arraste de seleção múltipla (ver seção seguinte), em vez de chamadas separadas de `onPolygonTranslated`/`onEquipmentPointsUpdate`. Como consequência, um Align/Distribute inteiro gera **um único passo de undo**, mesmo movendo vários itens de tipos diferentes.
 
 ### Arrastar Seleção Múltipla
 
@@ -596,24 +623,31 @@ const [draggingMulti, setDraggingMulti] = useState(null)
     initialPolygonPoints,
     initialEquipmentPoints:     [{id, point}],
     initialBoardPoints:         [{id, point}],
-    initialAvOrganizerPoints:   [{id, point}],
+    initialAvOrganizerRects:    [{id, rectStart, rectEnd}],
+    initialCustomBoardRects:    [{id, rectStart, rectEnd}],
     initialCurtainRects:        [{id, rectStart, rectEnd}],
   }],
-  looseEquipments: [{id, initialPoint}],  // equipamentos selecionados cujo polygonId NÃO está na seleção
+  // itens selecionados diretamente cujo polygonId NÃO está em multiSelectedPolygonIds
+  looseEquipments:   [{id, initialPoint}],
+  looseBoards:       [{id, initialPoint}],
+  looseCustomBoards: [{id, initialRectStart, initialRectEnd}],
+  looseAvOrganizers: [{id, initialRectStart, initialRectEnd}],
+  looseCurtains:     [{id, initialRectStart, initialRectEnd}],
 }
 ```
 
 **Ativação:**
 - **Polígono em `multiSelectedPolygonIds`**: `handlePolygonMouseDown` ativa `draggingMulti` imediatamente (sem hold timer)
 - **Equipamento em `multiSelectedEquipmentIds`**: `handleEquipmentMouseDown` ativa `draggingMulti` após `EQUIPMENT_HOLD_TO_DRAG_MS` via hold timer
+- **Board/Organizador AV/Quadro Custom/Cortina** em seus respectivos `multiSelected*Ids`: `handleBoardMouseDown`/`handleAvOrganizerMouseDown`/`handleCustomBoardMouseDown`/o `onMouseDown` inline da Cortina ativam `draggingMulti` após o mesmo hold timer de 180ms
 
-**`buildMultiDragState(stagePoint)`** — helper em `CadCanvas.jsx` que captura o estado inicial de todos os itens selecionados e retorna o objeto `draggingMulti`.
+**`buildMultiDragState(stagePoint)`** — helper em `CadCanvas.jsx` que captura o estado inicial de todos os itens selecionados (dos seis tipos) e retorna o objeto `draggingMulti`.
 
-**Live rendering:** `useEffect([draggingMulti])` atualiza `stageDelta` e chama `setPolygons` com as novas posições de todos os polígonos selecionados a cada `pointermove` — mesmo padrão do drag individual.
+**Live rendering:** `useEffect([draggingMulti])` atualiza `stageDelta` e chama `setPolygons` com as novas posições de todos os polígonos selecionados a cada `pointermove` — mesmo padrão do drag individual. Os itens "soltos" (loose) dos outros tipos leem `draggingMulti.loose*` diretamente no ponto de renderização (`getEquipmentDragPoint`-equivalente para cada tipo) para preview em tempo real.
 
-**Commit (`pointerup`):** chama `onMultiTranslated({ polygonTranslations, looseEquipmentUpdates })` e limpa `draggingMulti`.
+**Commit (`pointerup`):** chama `onMultiTranslated({ polygonTranslations, looseEquipmentUpdates, looseBoardUpdates, looseAvOrganizerUpdates, looseCustomBoardUpdates, looseCurtainUpdates })` e limpa `draggingMulti`.
 
-**`handleMultiTranslated` em `App.jsx`:** usa o padrão `isBatchingRef` — empurra **um único snapshot** antes, itera sobre `polygonTranslations` chamando `handlePolygonTranslated`, aplica `looseEquipmentUpdates` via `handleEquipmentPointsUpdate`, desliga o batching.
+**`handleMultiTranslated` em `App.jsx`:** usa o padrão `isBatchingRef` — empurra **um único snapshot** antes, itera sobre `polygonTranslations` chamando `handlePolygonTranslated`, aplica cada `loose*Updates` via seu batch-updater dedicado (`handleEquipmentPointsUpdate`, `handleBoardPointsUpdate`, `handleAvOrganizerRectsUpdate`, `handleCustomBoardRectsUpdate`, `handleCurtainRectsUpdate` — cada um faz um único `setState` percorrendo a lista de updates), desliga o batching.
 
 **`getPolygonDragData(polygonId)`** — helper em `CadCanvas.jsx` que unifica a verificação de drag single e multi:
 ```js

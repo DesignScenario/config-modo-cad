@@ -119,7 +119,6 @@ function TreeNode({
             }}
             onBlur={(event) => onRenameCommit?.(item.id, event.currentTarget.value)}
             onClick={(event) => event.stopPropagation()}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
           />
         </div>

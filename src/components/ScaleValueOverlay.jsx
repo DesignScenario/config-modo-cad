@@ -14,18 +14,17 @@ function ScaleValueOverlay({ onConclude, onCancel, defaultMetersValue = '', defa
     setCeilingHeightValue(defaultCeilingHeight == null ? '' : String(defaultCeilingHeight))
   }, [defaultCeilingHeight])
 
+  const numericValue = Number.parseFloat(metersValue)
+  const numericCeilingHeight = Number.parseFloat(ceilingHeightValue)
+  const canSubmit = Number.isFinite(numericValue)
+    && numericValue > 0
+    && Number.isFinite(numericCeilingHeight)
+    && numericCeilingHeight > 0
+
   const handleSubmit = (event) => {
     event.preventDefault()
 
-    const numericValue = Number.parseFloat(metersValue)
-    const numericCeilingHeight = Number.parseFloat(ceilingHeightValue)
-
-    if (
-      !Number.isFinite(numericValue)
-      || numericValue <= 0
-      || !Number.isFinite(numericCeilingHeight)
-      || numericCeilingHeight <= 0
-    ) {
+    if (!canSubmit) {
       return
     }
 
@@ -84,7 +83,7 @@ function ScaleValueOverlay({ onConclude, onCancel, defaultMetersValue = '', defa
             <button
               type="submit"
               className="cad-scale-overlay__start-btn"
-              disabled={!metersValue.trim() || !ceilingHeightValue.trim()}
+              disabled={!canSubmit}
             >
               Concluir
             </button>

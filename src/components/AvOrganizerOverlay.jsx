@@ -45,7 +45,6 @@ function AvOrganizerOverlay({ onConfirm, onClose, initialColumns }) {
                 if (event.key === 'Enter') handleConfirm()
                 else if (event.key === 'Escape') onClose?.()
               }}
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
             />
           </div>

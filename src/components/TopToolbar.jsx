@@ -85,7 +85,6 @@ function TopToolbar({
   onZoomChange,
   opacity,
   onOpacityChange,
-  onToggleEquipmentLibrary,
   onRotateImage,
   equipmentFilters,
   onToggleEquipmentFilter,
@@ -303,7 +302,7 @@ function TopToolbar({
                 onChange={(event) => {
                   setOpacityInput(event.target.value)
                 }}
-                onBlur={() => setOpacityInput(String(opacity))}
+                onBlur={commitOpacityValue}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     commitOpacityValue()
@@ -328,7 +327,7 @@ function TopToolbar({
                 onChange={(event) => {
                   setZoomInput(event.target.value)
                 }}
-                onBlur={() => setZoomInput(String(zoom))}
+                onBlur={commitZoomValue}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     commitZoomValue()

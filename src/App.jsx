@@ -12,7 +12,6 @@ import ScaleValueOverlay from './components/ScaleValueOverlay.jsx'
 import DeleteEnvironmentConfirmOverlay from './components/DeleteEnvironmentConfirmOverlay.jsx'
 import EnvironmentInfoOverlay from './components/EnvironmentInfoOverlay.jsx'
 import EquipmentPropertiesOverlay from './components/EquipmentPropertiesOverlay.jsx'
-import AutomationBoardOverlay from './components/AutomationBoardOverlay.jsx'
 import OcSensitivityOverlay from './components/OcSensitivityOverlay.jsx'
 import etiquetaDeAbasAbrir from './assets/etiqueta-de-abas-abrir.svg'
 import etiquetaDeAbasFechar from './assets/etiqueta-de-abas-fechar.svg'
@@ -20,7 +19,6 @@ import { createDefaultEquipmentFilters, BOARD_CATALOG_IDS, CUSTOM_BOARD_CATALOG_
 import { initialProject } from './data/initialProject.js'
 import './styles/cad.css'
 
-const AUTOMATION_ROOM_ID = 'sala-de-automacao'
 const PROJECT_ROOT_ID = 'novo-projeto'
 const MIN_ZOOM = 10
 const MAX_ZOOM = 3000
@@ -241,7 +239,6 @@ function App() {
   const [customBoards, setCustomBoards] = useState([])
   const [selectedCustomBoardId, setSelectedCustomBoardId] = useState(null)
   const [renamingCustomBoardId, setRenamingCustomBoardId] = useState(null)
-  const [renamingCustomBoardSource, setRenamingCustomBoardSource] = useState(null)
   const [pendingCustomBoardEquipment, setPendingCustomBoardEquipment] = useState(null)
   const [isAwaitingScaleLine, setIsAwaitingScaleLine] = useState(false)
   const [pendingScaleSegment, setPendingScaleSegment] = useState(null)
@@ -279,6 +276,7 @@ function App() {
   const [deleteRequest, setDeleteRequest] = useState(null)
   const deleteTokenRef = useRef(0)
   const [polygonFocusRequest, setPolygonFocusRequest] = useState(null)
+  const focusTokenRef = useRef(0)
   const [pendingImportPavimentoId, setPendingImportPavimentoId] = useState(null)
   const [importedPlanPavimentoId, setImportedPlanPavimentoId] = useState(null)
   const dragStateRef = useRef({ dragging: false })
@@ -414,7 +412,23 @@ function App() {
     setShowEquipmentLibrary(false)
     setMultiAddPlacementRequest(null)
     setAutomationBoards([])
-    setPendingBoardPlacement(null)
+    setPolygons([])
+    setSyncPolygons({ polygons: [] })
+    setCustomBoards([])
+    setSelectedCustomBoardId(null)
+    setRenamingCustomBoardId(null)
+    setPendingCustomBoardEquipment(null)
+    setAvOrganizers([])
+    setSelectedAvOrganizerId(null)
+    setRenamingAvOrganizerId(null)
+    setRenamingAvOrganizerSource(null)
+    setPendingAvOrganizerEquipment(null)
+    setPlacedCurtains([])
+    setSelectedCurtainId(null)
+    setRenamingCurtainId(null)
+    setPendingCurtainEquipment(null)
+    setPendingOcPlacement(null)
+    setRenamingGenericNodeId(null)
 
     const fallbackPavimentoId = findFirstPavimentoId(initialProject)
     setImportedPlanPavimentoId(targetPavimentoId ?? fallbackPavimentoId)
@@ -653,6 +667,8 @@ function App() {
     pushSnapshotMaybe()
     setAutomationBoards((curr) => curr.filter((b) => b.id !== boardId))
     setProjectTree((curr) => removeNodeById(curr, boardId))
+    setSelectedBoardId((curr) => (curr === boardId ? null : curr))
+    setRenamingBoardId((curr) => (curr === boardId ? null : curr))
   }
 
   const handleBoardMoved = ({ boardId, point, polygonId }) => {
@@ -739,6 +755,8 @@ function App() {
     pushSnapshotMaybe()
     setAvOrganizers((curr) => curr.filter((o) => o.id !== id))
     setProjectTree((curr) => removeNodeById(curr, id))
+    setSelectedAvOrganizerId((curr) => (curr === id ? null : curr))
+    setRenamingAvOrganizerId((curr) => (curr === id ? null : curr))
   }
 
   const handleAvOrganizerSlotInstall = ({ organizerId, slotIndex, device }) => {
@@ -816,6 +834,8 @@ function App() {
     setSelectedEquipmentId(null)
     setSelectedBoardId(null)
     setSelectedCustomBoardId(null)
+    setSelectedCurtainId(null)
+    setSelectedEnvironmentId(null)
   }
 
   const handleCreateCustomBoard = ({ polygonId, environmentId, equipment, rectStart, rectEnd }) => {
@@ -862,6 +882,8 @@ function App() {
     pushSnapshotMaybe()
     setCustomBoards((curr) => curr.filter((b) => b.id !== id))
     setProjectTree((curr) => removeNodeById(curr, id))
+    setSelectedCustomBoardId((curr) => (curr === id ? null : curr))
+    setRenamingCustomBoardId((curr) => (curr === id ? null : curr))
   }
 
   const handleCustomBoardSlotInstall = ({ boardId, slotIndex, device }) => {
@@ -915,12 +937,10 @@ function App() {
 
   const handleCustomBoardRenameRequest = (id) => {
     setRenamingCustomBoardId(id)
-    setRenamingCustomBoardSource('canvas')
   }
 
   const handleCustomBoardLabelDoubleClick = (id) => {
     setRenamingCustomBoardId(id)
-    setRenamingCustomBoardSource('canvas')
   }
 
   const handleCommitCustomBoardLabelRename = (id, newName) => {
@@ -931,7 +951,6 @@ function App() {
       setProjectTree((curr) => updateNodeLabel(curr, id, trimmed))
     }
     setRenamingCustomBoardId(null)
-    setRenamingCustomBoardSource(null)
   }
 
   const handleSelectCustomBoard = (id) => {
@@ -940,6 +959,7 @@ function App() {
     setSelectedBoardId(null)
     setSelectedAvOrganizerId(null)
     setSelectedCurtainId(null)
+    setSelectedEnvironmentId(null)
   }
 
   const handleEquipmentDropped = ({ polygonId, point, equipment, wallNormal }) => {
@@ -1113,6 +1133,7 @@ function App() {
     setSelectedBoardId(null)
     setSelectedAvOrganizerId(null)
     setSelectedCustomBoardId(null)
+    setSelectedEnvironmentId(null)
     setRenamingCurtainId(null)
   }
 
@@ -1377,12 +1398,20 @@ function App() {
 
   const handleDeleteNodeFromTree = (node) => {
     if (node?.source === 'equipment-item') {
-      handleDeleteEquipment(node.id)
+      if (placedCurtains.some((c) => c.id === node.id)) {
+        handleDeleteCurtain(node.id)
+      } else {
+        handleDeleteEquipment(node.id)
+      }
       return
     }
 
     if (node?.source === 'automation-board') {
-      handleDeleteBoard(node.id)
+      if (customBoards.some((b) => b.id === node.id)) {
+        handleDeleteCustomBoard(node.id)
+      } else {
+        handleDeleteBoard(node.id)
+      }
       return
     }
 
@@ -1433,19 +1462,32 @@ function App() {
     setPendingDeletePolygonId(null)
   }
 
-  const handleMultiDeleteRequest = (polygonIds, equipmentIds) => {
-    if (!polygonIds.length && !equipmentIds.length) return
-    setPendingMultiDelete({ polygonIds, equipmentIds })
+  const handleMultiDeleteRequest = ({
+    polygonIds = [],
+    equipmentIds = [],
+    boardIds = [],
+    customBoardIds = [],
+    avOrganizerIds = [],
+    curtainIds = [],
+  }) => {
+    const total = polygonIds.length + equipmentIds.length + boardIds.length
+      + customBoardIds.length + avOrganizerIds.length + curtainIds.length
+    if (!total) return
+    setPendingMultiDelete({ polygonIds, equipmentIds, boardIds, customBoardIds, avOrganizerIds, curtainIds })
   }
 
   const handleConfirmMultiDelete = () => {
     if (!pendingMultiDelete) return
-    const { polygonIds, equipmentIds } = pendingMultiDelete
+    const { polygonIds, equipmentIds, boardIds, customBoardIds, avOrganizerIds, curtainIds } = pendingMultiDelete
     pushSnapshot(captureSnapshot())
     isBatchingRef.current = true
     polygonIds.forEach((polygonId) => handlePolygonDeleted(polygonId))
     if (polygonIds.length) setMultiDeletePolygonIds([...polygonIds])
     equipmentIds.forEach((equipmentId) => handleDeleteEquipment(equipmentId))
+    boardIds.forEach((boardId) => handleDeleteBoard(boardId))
+    customBoardIds.forEach((customBoardId) => handleDeleteCustomBoard(customBoardId))
+    avOrganizerIds.forEach((avOrganizerId) => handleDeleteAvOrganizer(avOrganizerId))
+    curtainIds.forEach((curtainId) => handleDeleteCurtain(curtainId))
     isBatchingRef.current = false
     setPendingMultiDelete(null)
   }
@@ -1481,7 +1523,54 @@ function App() {
     )
   }
 
-  const handleMultiTranslated = ({ polygonTranslations, looseEquipmentUpdates }) => {
+  const handleBoardPointsUpdate = (updates) => {
+    pushSnapshotMaybe()
+    setAutomationBoards((current) =>
+      current.map((board) => {
+        const update = updates.find((u) => u.id === board.id)
+        return update ? { ...board, point: update.point } : board
+      }),
+    )
+  }
+
+  const handleCustomBoardRectsUpdate = (updates) => {
+    pushSnapshotMaybe()
+    setCustomBoards((current) =>
+      current.map((board) => {
+        const update = updates.find((u) => u.id === board.id)
+        return update ? { ...board, rectStart: update.rectStart, rectEnd: update.rectEnd } : board
+      }),
+    )
+  }
+
+  const handleAvOrganizerRectsUpdate = (updates) => {
+    pushSnapshotMaybe()
+    setAvOrganizers((current) =>
+      current.map((org) => {
+        const update = updates.find((u) => u.id === org.id)
+        return update ? { ...org, rectStart: update.rectStart, rectEnd: update.rectEnd } : org
+      }),
+    )
+  }
+
+  const handleCurtainRectsUpdate = (updates) => {
+    pushSnapshotMaybe()
+    setPlacedCurtains((current) =>
+      current.map((curtain) => {
+        const update = updates.find((u) => u.id === curtain.id)
+        return update ? { ...curtain, rectStart: update.rectStart, rectEnd: update.rectEnd } : curtain
+      }),
+    )
+  }
+
+  const handleMultiTranslated = ({
+    polygonTranslations,
+    looseEquipmentUpdates,
+    looseBoardUpdates,
+    looseCustomBoardUpdates,
+    looseAvOrganizerUpdates,
+    looseCurtainUpdates,
+  }) => {
     pushSnapshot(captureSnapshot())
     isBatchingRef.current = true
     for (const translation of polygonTranslations) {
@@ -1489,6 +1578,18 @@ function App() {
     }
     if (looseEquipmentUpdates?.length) {
       handleEquipmentPointsUpdate(looseEquipmentUpdates)
+    }
+    if (looseBoardUpdates?.length) {
+      handleBoardPointsUpdate(looseBoardUpdates)
+    }
+    if (looseCustomBoardUpdates?.length) {
+      handleCustomBoardRectsUpdate(looseCustomBoardUpdates)
+    }
+    if (looseAvOrganizerUpdates?.length) {
+      handleAvOrganizerRectsUpdate(looseAvOrganizerUpdates)
+    }
+    if (looseCurtainUpdates?.length) {
+      handleCurtainRectsUpdate(looseCurtainUpdates)
     }
     isBatchingRef.current = false
   }
@@ -1526,9 +1627,10 @@ function App() {
     }
 
     handleSelectEnvironment(environment.id)
+    focusTokenRef.current += 1
     setPolygonFocusRequest({
       polygonId: environment.polygonId,
-      token: Date.now(),
+      token: focusTokenRef.current,
     })
   }
 
@@ -1536,11 +1638,17 @@ function App() {
     setSelectedEnvironmentId(environmentId)
     setSelectedEquipmentId(null)
     setSelectedBoardId(null)
+    setSelectedAvOrganizerId(null)
+    setSelectedCustomBoardId(null)
+    setSelectedCurtainId(null)
   }
 
   const handleSelectEquipment = (equipmentId) => {
     setSelectedEquipmentId(equipmentId)
     setSelectedBoardId(null)
+    setSelectedAvOrganizerId(null)
+    setSelectedCustomBoardId(null)
+    setSelectedCurtainId(null)
     const equipment = placedEquipments.find((currentEquipment) => currentEquipment.id === equipmentId)
     if (equipment?.environmentId) {
       setSelectedEnvironmentId(equipment.environmentId)
@@ -1550,6 +1658,9 @@ function App() {
   const handleSelectBoard = (boardId) => {
     setSelectedBoardId(boardId)
     setSelectedEquipmentId(null)
+    setSelectedAvOrganizerId(null)
+    setSelectedCustomBoardId(null)
+    setSelectedCurtainId(null)
     const board = automationBoards.find((b) => b.id === boardId)
     if (board?.environmentId) {
       setSelectedEnvironmentId(board.environmentId)
@@ -1659,7 +1770,11 @@ function App() {
     }
 
     if (node?.source === 'equipment-item') {
-      handleStartEquipmentRename(node.id, 'tree')
+      if (placedCurtains.some((c) => c.id === node.id)) {
+        setRenamingGenericNodeId(node.id)
+      } else {
+        handleStartEquipmentRename(node.id, 'tree')
+      }
       return
     }
 
@@ -1681,6 +1796,18 @@ function App() {
 
     if (placedEquipments.some((equipment) => equipment.id === nodeId)) {
       handleCommitEquipmentRename(nodeId, newName)
+      return
+    }
+
+    if (placedCurtains.some((c) => c.id === nodeId)) {
+      handleCurtainRenameCommit(nodeId, newName)
+      setRenamingGenericNodeId(null)
+      return
+    }
+
+    if (customBoards.some((b) => b.id === nodeId)) {
+      handleCommitCustomBoardLabelRename(nodeId, newName)
+      setRenamingGenericNodeId(null)
       return
     }
 
@@ -1838,10 +1965,6 @@ function App() {
     handleImportImage(file, pendingImportPavimentoId)
     event.target.value = ''
   }
-
-  const scaleStatusLabel = scaleDefinition
-    ? `Escala definida: ${scaleDefinition.meters.toFixed(2)} m em ${scaleDefinition.pixels.toFixed(1)} px`
-    : 'Escala nao definida'
 
   const nextEnvironmentName = `Ambiente ${environments.length + 1}`
   const editingEnvironment = environments.find((environment) => environment.id === editingEnvironmentId) ?? null
@@ -2006,7 +2129,6 @@ function App() {
               onZoomChange={handleZoomChange}
               opacity={backgroundOpacity}
               onOpacityChange={handleBackgroundOpacityChange}
-              onToggleEquipmentLibrary={() => setShowEquipmentLibrary((current) => !current)}
               onRotateImage={handleRotateImage}
               equipmentFilters={equipmentFilters}
               onToggleEquipmentFilter={handleToggleEquipmentFilter}
@@ -2029,7 +2151,6 @@ function App() {
                 scaleDefinition={scaleDefinition}
                 onPolygonSegmentCreated={handlePolygonSegmentCreated}
                 onPolygonCreated={handlePolygonCreated}
-                onPolygonDeleted={handlePolygonDeleted}
                 deletePolygonId={polygonDeleteRequestId}
                 deletePolygonIds={multiDeletePolygonIds}
                 onMultiDeleteRequest={handleMultiDeleteRequest}
@@ -2206,19 +2327,31 @@ function App() {
                 />
               ) : null}
               {pendingMultiDelete ? (() => {
-                const { polygonIds, equipmentIds } = pendingMultiDelete
-                const total = polygonIds.length + equipmentIds.length
+                const {
+                  polygonIds = [], equipmentIds = [], boardIds = [],
+                  customBoardIds = [], avOrganizerIds = [], curtainIds = [],
+                } = pendingMultiDelete
+                const categories = [
+                  { ids: polygonIds, singular: 'ambiente', plural: 'ambientes', gender: 'm' },
+                  { ids: equipmentIds, singular: 'equipamento', plural: 'equipamentos', gender: 'm' },
+                  { ids: boardIds, singular: 'quadro de automação', plural: 'quadros de automação', gender: 'm' },
+                  { ids: customBoardIds, singular: 'quadro custom', plural: 'quadros custom', gender: 'm' },
+                  { ids: avOrganizerIds, singular: 'organizador AV', plural: 'organizadores AV', gender: 'm' },
+                  { ids: curtainIds, singular: 'cortina', plural: 'cortinas', gender: 'f' },
+                ]
+                const nonEmpty = categories.filter((category) => category.ids.length > 0)
+                const total = nonEmpty.reduce((sum, category) => sum + category.ids.length, 0)
                 let message
-                if (polygonIds.length && equipmentIds.length) {
+                if (nonEmpty.length > 1) {
                   message = `Deseja realmente apagar os ${total} itens selecionados?`
-                } else if (polygonIds.length > 1) {
-                  message = `Deseja realmente apagar os ${polygonIds.length} ambientes selecionados?`
-                } else if (polygonIds.length === 1) {
-                  message = 'Deseja realmente apagar o ambiente selecionado?'
-                } else if (equipmentIds.length > 1) {
-                  message = `Deseja realmente apagar os ${equipmentIds.length} equipamentos selecionados?`
+                } else if (nonEmpty.length === 1 && nonEmpty[0].ids.length === 1) {
+                  const category = nonEmpty[0]
+                  const article = category.gender === 'f' ? 'a' : 'o'
+                  message = `Deseja realmente apagar ${article} ${category.singular} selecionad${article}?`
                 } else {
-                  message = 'Deseja realmente apagar o equipamento selecionado?'
+                  const category = nonEmpty[0]
+                  const article = category.gender === 'f' ? 'as' : 'os'
+                  message = `Deseja realmente apagar ${article} ${category.ids.length} ${category.plural} selecionad${article}?`
                 }
                 return (
                   <DeleteEnvironmentConfirmOverlay

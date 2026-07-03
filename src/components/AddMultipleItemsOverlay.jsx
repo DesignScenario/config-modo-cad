@@ -55,13 +55,11 @@ function AddMultipleItemsOverlay({ itemLabel, isLighting, onConfirm, onClose }) 
               value={quantity}
               onChange={(event) => setQuantity(event.target.value)}
               onKeyDown={handleKeyDown}
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
             />
           </div>
 
           {isLighting ? (
-            // eslint-disable-next-line jsx-a11y/label-has-associated-control
             <label className="cad-multi-overlay__circuit-row">
               <span
                 className={`cad-multi-overlay__circuit-checkbox${sameCircuit ? ' is-checked' : ''}`}
